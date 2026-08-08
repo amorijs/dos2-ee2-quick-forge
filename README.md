@@ -30,11 +30,17 @@ Run the tests (requires a Lua 5.x interpreter on PATH):
 lua tests/run.lua
 ```
 
-To play-test, package `Mods/` + (empty) `Public/` into a `.pak` with
-[LSLib](https://github.com/Norbyte/lslib)'s ConverterApp/divine (DOS2 DE,
-package version v13), or symlink the `Mods/QuickForge_*` folder into
-`..\Divinity Original Sin 2\DefEd\Data\Mods\` for loose-file loading with the
-Script Extender's DeveloperMode. Load order: EE2 Core → EE2 → Epip → QuickForge.
+To play-test, build and deploy the pak (requires
+[LSLib](https://github.com/Norbyte/lslib)'s divine.exe; pass `-DivinePath` or
+set `LSLIB_PATH` if it isn't in a common location):
+
+```
+tools\pack.ps1
+```
+
+This writes `QuickForge.pak` at the repo root and copies it into the game's
+`Documents\Larian Studios\...\Mods` folder (skip the copy with `-NoDeploy`).
+Load order: EE2 Core → EE2 → Epip → QuickForge.
 
 Requires: Epic Encounters Core, Epip Encounters, Norbyte's Script Extender
 (v60+). Keyboard & mouse only — Epip's context-menu system is disabled on
