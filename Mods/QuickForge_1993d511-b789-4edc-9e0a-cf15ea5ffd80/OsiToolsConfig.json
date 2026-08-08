@@ -1,0 +1,8 @@
+{
+    "RequiredExtensionVersion": 60,
+    "ModTable": "QuickForge",
+    "FeatureFlags": [
+        "Lua",
+        "OsirisExtensions"
+    ]
+}

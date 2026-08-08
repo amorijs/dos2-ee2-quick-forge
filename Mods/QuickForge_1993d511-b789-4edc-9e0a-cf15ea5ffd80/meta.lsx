@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<save>
+    <header version="2" />
+    <version major="3" minor="6" revision="6" build="0" />
+    <region id="Config">
+        <node id="root">
+            <children>
+                <node id="Dependencies">
+                    <children>
+                        <node id="ModuleShortDesc">
+                            <attribute id="Folder" value="Epic_Encounters_Core_63bb9b65-2964-4c10-be5b-55a63ec02fa0" type="30" />
+                            <attribute id="MD5" value="" type="23" />
+                            <attribute id="Name" value="Epic Encounters: Core Systems" type="22" />
+                            <attribute id="UUID" value="63bb9b65-2964-4c10-be5b-55a63ec02fa0" type="22" />
+                            <attribute id="Version" value="319094792" type="4" />
+                        </node>
+                        <node id="ModuleShortDesc">
+                            <attribute id="Folder" value="EpipEncounters_7d32cb52-1cfd-4526-9b84-db4867bf9356" type="30" />
+                            <attribute id="MD5" value="" type="23" />
+                            <attribute id="Name" value="Epip" type="22" />
+                            <attribute id="UUID" value="7d32cb52-1cfd-4526-9b84-db4867bf9356" type="22" />
+                            <attribute id="Version" value="268894213" type="4" />
+                        </node>
+                    </children>
+                </node>
+                <node id="ModuleInfo">
+                    <attribute id="Author" value="Chris Amori" type="30" />
+                    <attribute id="CharacterCreationLevelName" value="" type="22" />
+                    <attribute id="Description" value="Adds Greatforge shortcuts to the equipment right-click context menu. Requires Epic Encounters 2 and Epip Encounters." type="30" />
+                    <attribute id="DescriptionName" value="" handle="ls::TranslatedStringRepository::s_HandleUnknown" type="28" />
+                    <attribute id="DisplayName" value="" handle="ls::TranslatedStringRepository::s_HandleUnknown" type="28" />
+                    <attribute id="Folder" value="QuickForge_1993d511-b789-4edc-9e0a-cf15ea5ffd80" type="30" />
+                    <attribute id="GMTemplate" value="" type="22" />
+                    <attribute id="LobbyLevelName" value="" type="22" />
+                    <attribute id="MD5" value="" type="23" />
+                    <attribute id="MenuLevelName" value="" type="22" />
+                    <attribute id="Name" value="QuickForge" type="22" />
+                    <attribute id="NumPlayers" value="2" type="1" />
+                    <attribute id="PhotoBooth" value="" type="22" />
+                    <attribute id="StartupLevelName" value="" type="22" />
+                    <attribute id="Tags" value="" type="30" />
+                    <attribute id="Type" value="Add-on" type="22" />
+                    <attribute id="UUID" value="1993d511-b789-4edc-9e0a-cf15ea5ffd80" type="22" />
+                    <attribute id="Version" value="268435456" type="4" />
+                    <children>
+                        <node id="PublishVersion">
+                            <attribute id="Version" value="268435456" type="4" />
+                        </node>
+                        <node id="Scripts" />
+                        <node id="TargetModes">
+                            <children>
+                                <node id="Target">
+                                    <attribute id="Object" value="Story" type="22" />
+                                </node>
+                            </children>
+                        </node>
+                    </children>
+                </node>
+            </children>
+        </node>
+    </region>
+</save>
