@@ -79,6 +79,22 @@ function QuickForge._BenchPending(charGuid)
     local map = Osi.DB_CurrentLevel:Get(nil)[1][1]
     Osi.QRY_AMER_UI_Greatforge_GetCraftObject(instance, charGuid, map)
 
+    -- Reserving teleports the craft object to the character — but at this
+    -- point the character has not yet made their timed fade-teleport into the
+    -- UI area, so the object would be left at their old world position.
+    -- Combine's donor picker opens the vanilla crafting UI on the craft
+    -- object, which needs it near the character; park it at the instance's
+    -- teleport anchor, where the character is about to arrive.
+    local reserved = Osi.DB_AMER_UI_Greatforge_CraftObject_Reserved:Get(instance, nil)
+    local anchors = Osi.DB_AMER_UI_TeleportAnchor:Get(map, instance, nil)
+    if reserved and reserved[1] and anchors and anchors[1] then
+        local craftObject, anchor = reserved[1][2], anchors[1][3]
+        local x, y, z = Osi.GetPosition(anchor)
+        if x then
+            Osi.TeleportToPosition(craftObject, x, y, z, "", 0, 1)
+        end
+    end
+
     Osi.PROC_AMER_UI_Greatforge_BenchedItem_Set(instance, charGuid, pending.ItemGuid)
 end
 
