@@ -1,0 +1,6 @@
+# Reference material (EE2 paks + extractions, Epip source clone) — not part of the mod
+references/
+
+# Local machine settings
+settings.local.json
+.claude/settings.local.json
