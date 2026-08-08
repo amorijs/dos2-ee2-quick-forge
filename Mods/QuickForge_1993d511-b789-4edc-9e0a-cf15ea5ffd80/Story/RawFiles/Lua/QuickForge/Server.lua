@@ -71,6 +71,14 @@ function QuickForge._BenchPending(charGuid)
     end
     local instance = sessions[1][1]
 
+    -- Reserve the instance's craft object (normally done when the player
+    -- clicks the forge socket). Committing silently no-ops without it:
+    -- PROC_AMER_UI_Funds_RequestSuccess requires
+    -- DB_AMER_UI_Greatforge_CraftObject_Reserved to reach DoCraft.
+    -- The query is idempotent; EE2's exit cleanup releases the object.
+    local map = Osi.DB_CurrentLevel:Get(nil)[1][1]
+    Osi.QRY_AMER_UI_Greatforge_GetCraftObject(instance, charGuid, map)
+
     Osi.PROC_AMER_UI_Greatforge_BenchedItem_Set(instance, charGuid, pending.ItemGuid)
 end
 
