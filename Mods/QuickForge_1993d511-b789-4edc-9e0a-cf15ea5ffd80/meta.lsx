@@ -44,7 +44,10 @@
                     <attribute id="Version" value="268435456" type="4" />
                     <children>
                         <node id="PublishVersion">
-                            <attribute id="Version" value="268435456" type="4" />
+                            <!-- DE-range engine version marker (same value Epip publishes with).
+                                 The game reads this node to decide Classic vs Definitive Edition;
+                                 a low value here triggers "Incompatible mod ... Classic Edition". -->
+                            <attribute id="Version" value="909321303" type="4" />
                         </node>
                         <node id="Scripts" />
                         <node id="TargetModes">
