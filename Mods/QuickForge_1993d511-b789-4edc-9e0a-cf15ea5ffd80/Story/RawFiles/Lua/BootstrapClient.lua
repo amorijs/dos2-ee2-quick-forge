@@ -7,5 +7,11 @@ if not Ext.Mod.IsModLoaded(EPIP_UUID) or not Ext.Mod.IsModLoaded(EE_CORE_UUID) t
     return
 end
 
+-- The Script Extender sandboxes each ModTable mod into its own Lua
+-- environment; Epip's globals (Epip, _Feature, Client, Item, Net, ...) live
+-- in Mods.EpipEncounters. ImportGlobals is Epip's sanctioned way to expose
+-- them to an addon's environment.
+Mods.EpipEncounters.Epip.ImportGlobals(Mods.QuickForge)
+
 Ext.Require(MOD_PREFIX, "QuickForge/Shared.lua")
 Ext.Require(MOD_PREFIX, "QuickForge/Client.lua")
