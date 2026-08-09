@@ -2,13 +2,10 @@
 
 ## Preview
 
-<img width="536" height="420" alt="image" src="https://github.com/user-attachments/assets/25239975-8606-44ae-b020-ec8e94b5f600" />
+<img width="1711" height="760" alt="combined-image" src="https://github.com/user-attachments/assets/b7979d73-27c3-44c4-88ec-03e80dc6e510" />
 
-<img width="407" height="420" alt="image" src="https://github.com/user-attachments/assets/975ed535-bc53-41c2-b0d9-cf4294c735f8" />
+<img width="2022" height="1453" alt="combined-image (1)" src="https://github.com/user-attachments/assets/2fd1fcd1-fdd3-45de-858f-7b5491619315" />
 
-<img width="400" height="728" alt="image" src="https://github.com/user-attachments/assets/ca5bc1d7-00d5-4aa0-8b00-0a87f9f4112e" />
-
-<img width="599" height="727" alt="image" src="https://github.com/user-attachments/assets/56c9259a-0012-4c2c-a08e-36276ec5f34c" />
 
 
 ## What it does
