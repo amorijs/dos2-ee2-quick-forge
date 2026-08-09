@@ -21,9 +21,30 @@ click Confirm and it's done.
 Everything works exactly as it does at the real Greatforge — same rules,
 same costs, same results. QuickForge just saves you the walk.
 
-**Requires:** Epic Encounters Core, Epip Encounters, and Norbyte's Script
-Extender (v60+). Keyboard & mouse only. Load order: EE2 Core → EE2 → Epip →
-QuickForge.
+## Installation
+
+**You'll need these first** (QuickForge is an add-on for them, not a
+standalone mod):
+
+- [Norbyte's Script Extender](https://github.com/Norbyte/ositools) (v60 or newer)
+- Epic Encounters 2 — both **EE2 Core** and **EE2** (Steam Workshop)
+- [Epip Encounters](https://github.com/PinewoodPip/EpipEncounters)
+
+**Then:**
+
+1. Download `QuickForge.pak` from the
+   [latest release](https://github.com/amorijs/dos2-ee2-quick-forge/releases/latest).
+2. Drop it into your mods folder:
+   `Documents\Larian Studios\Divinity Original Sin 2 Definitive Edition\Mods`
+3. Launch the game and open the **Mods** menu from the main menu.
+4. Enable QuickForge and make sure it sits **last** in the load order:
+
+   > EE2 Core → EE2 → Epip → QuickForge
+
+That's it — start or load a save and right-click a piece of gear.
+
+**Note:** keyboard & mouse only. Epip's right-click menu doesn't run on
+controller, so QuickForge can't either.
 
 ---
 
@@ -64,8 +85,4 @@ tools\pack.ps1
 
 This writes `QuickForge.pak` at the repo root and copies it into the game's
 `Documents\Larian Studios\...\Mods` folder (skip the copy with `-NoDeploy`).
-Load order: EE2 Core → EE2 → Epip → QuickForge.
-
-Requires: Epic Encounters Core, Epip Encounters, Norbyte's Script Extender
-(v60+). Keyboard & mouse only — Epip's context-menu system is disabled on
-controller.
+Prerequisites and load order are in [Installation](#installation) above.
