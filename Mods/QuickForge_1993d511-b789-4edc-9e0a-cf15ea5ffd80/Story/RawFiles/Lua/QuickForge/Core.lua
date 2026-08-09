@@ -43,6 +43,8 @@ local Core = {}
 ---@field Key string Stable identity between preview and commit (property prefix, or donor GUID).
 ---@field Eligible boolean
 ---@field Cost integer? Per-row cost; nil for options with a flat window cost.
+---@field Reason string? Why the row is ineligible, if it is.
+---@field ReasonText string? The reason in EE2's own words, server-resolved.
 
 ---Weapons hold up to 2 runes when one-handed; everything else up to 3.
 ---@param facts QuickForge.ItemFacts

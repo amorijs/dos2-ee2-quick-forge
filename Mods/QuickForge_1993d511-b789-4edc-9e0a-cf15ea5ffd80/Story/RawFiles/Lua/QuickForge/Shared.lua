@@ -160,24 +160,131 @@ Epip.RegisterFeature("QuickForge", "QuickForge", QuickForge)
 
 QuickForge.Core = Ext.Require(MOD_PREFIX, "QuickForge/Core.lua")
 
----EE2's option-description string handles, from its own
----`Localization/AMER_UI_Greatforge.lsb` (keys "AMER_UI_Greatforge_Desc_*").
----EE2 defines the keys only in that key bank, which the Script Extender's
----key lookup does not resolve, so the Forge Window references the handles;
----the text itself still comes from the game's localization at runtime.
+---EE2 strings the Forge Window shows. Their keys exist only in EE2's
+---`Localization/*.lsb` key banks, which the extender's key lookup has been
+---observed not to resolve, and the handles (extracted from
+---`Localization/AMER_UI_Greatforge.lsb`) can drift across EE2 releases —
+---so each entry bundles a verbatim fallback copy of EE2's text.
+---`ResolveEE2String` prefers the live handle, then the live key, then the
+---bundled copy: EE2's current text wins whenever it is reachable, and the
+---window is never blank when it is not.
 ---Epip's own options (AddSockets, PIP_Engrave) register their keys at
 ---runtime and resolve by key, so they are absent here.
----@type table<string, TranslatedStringHandle>
-QuickForge.EE2_DESC_HANDLES = {
-    Reduce = "h8a8b6c8bgd119g49e6gba99g4bb18ba073fd",
-    LevelUp = "hc7c66553g79f8g4079g9a65gb73e8cbd8452",
-    ExtractRunes = "h330f2b00gcf60g46e7gaa4dgb5c0b715520f",
-    Transmute = "hebc3cf53g9421g4ec1ga783ga4389b0f57f7",
-    Masterwork = "he1b10f66g87f7g4522ga363g21e00f87e25a",
-    Focalize = "h0f37796ag94b5g4174gbca4g2bc90c94ad9c",
-    RemoveMods = "h0d0d4435g1428g45cag9494g90ad9fb1cf10",
-    Combine = "h8eddba67g5ff9g4ba5g84dag165775111b92",
+---@type table<string, {Key: string?, Handle: TranslatedStringHandle?, Fallback: string}>
+QuickForge.EE2_STRINGS = {
+    Desc_Reduce = {
+        Key = "AMER_UI_Greatforge_Desc_Reduce",
+        Handle = "h8a8b6c8bgd119g49e6gba99g4bb18ba073fd",
+        Fallback = [[<p align="left">Destroy this item to recover Artificer's Splinters and some of its basic materials. Higher-quality items will yield better results.<br><br>Any socketed runes will be recovered.<br><br>Splinters granted:</p>]],
+    },
+    Desc_LevelUp = {
+        Key = "AMER_UI_Greatforge_Desc_LevelUp",
+        Handle = "hc7c66553g79f8g4079g9a65gb73e8cbd8452",
+        Fallback = [[<p align="left">Raise this item's level by one, or to your level minus two, whichever is higher. This increases its damage or armor values, and can support Masterworking its properties.<br><font color="a8a8a8" size="21" face="Averia Serif">Items with very low armor may not see any increase from this. Choose wisely.<br><br>The item's requirements may increase, but this change will not be displayed until you save and reload your game.</font></p>]],
+    },
+    Desc_ExtractRunes = {
+        Key = "AMER_UI_Greatforge_Desc_ExtractRunes",
+        Handle = "h330f2b00gcf60g46e7gaa4dgb5c0b715520f",
+        Fallback = [[<p align="left">Recover all socketed runes carefully enough to preserve the host item.</p>]],
+    },
+    Desc_Transmute = {
+        Key = "AMER_UI_Greatforge_Desc_Transmute",
+        Handle = "hebc3cf53g9421g4ec1ga783ga4389b0f57f7",
+        Fallback = [[<p align="left">Transmute a non-unique item into a random item of the same rarity.</p>]],
+    },
+    Desc_Masterwork = {
+        Key = "AMER_UI_Greatforge_Desc_Masterwork",
+        Handle = "he1b10f66g87f7g4522ga363g21e00f87e25a",
+        Fallback = [[<p align="left">Enchance a mundane non-implicit item property.<br><br>Masterworking has a variable cost, based on the property chosen; how much the property will be improved, as well as how rare the improved property usually is.<br><br><font color="a8a8a8" size="21" face="Averia Serif">You may only Masterwork an item once.</font></p>]],
+    },
+    Desc_Focalize = {
+        Key = "AMER_UI_Greatforge_Desc_Focalize",
+        Handle = "h0f37796ag94b5g4174gbca4g2bc90c94ad9c",
+        Fallback = [[<p align="left">Focus an Artifact into a rune, so that its unique power may be added to another item.<br><br>Artifact Runes may only be placed in an item of the same equipment slot as the original Artifact<br>(Axe to Bow works, but Axe to Ring does not).</p>]],
+    },
+    Desc_RemoveMods = {
+        Key = "AMER_UI_Greatforge_Desc_RemoveMods",
+        Handle = "h0d0d4435g1428g45cag9494g90ad9fb1cf10",
+        Fallback = [[<p align="left">Replaces your item with a new one of the same type and rarity with only the selected property, in addition to rerandomized item-implicit properties and sockets.<br><br>Any socketed runes will be recovered</p>]],
+    },
+    Desc_Combine = {
+        Key = "AMER_UI_Greatforge_Desc_Combine",
+        Handle = "h8eddba67g5ff9g4ba5g84dag165775111b92",
+        Fallback = [[<p align="left">Choose an item with one non-implicit property,<br>it will be destroyed to add that property to your item.<br><br>The property must be one that can normally appear on your item.<br><br>Items have a maximum number of non-implicit properties, based on their rarity: Uncommon: 2,<br>Rare: 3, Epic: 4, Legendary: 5, Divine: 6, Artifact: 5</p>]],
+    },
+    Masterwork_PropertyMaxed = {
+        Key = "AMER_UI_Greatforge_Masterwork_PropertyMaxed",
+        Handle = "h397742e2ga2c6g4b86gacadgac1019297f51",
+        Fallback = "This property cannot be improved any further.",
+    },
+    -- Not an engine key: EE2 builds this message from its own Osiris
+    -- string cache (DB_AMER_GEN_TSK_Cache) and appends the required level.
+    -- The server does the same; this fallback covers a missing cache row.
+    Masterwork_LevelTooHigh = {
+        Fallback = "Masterworking this property requires at least item level ",
+    },
+    Combine_ItemAddedIsTheSame = {
+        Key = "AMER_UI_Greatforge_Combine_ItemAddedIsTheSame",
+        Handle = "h9fd682d1g42ffg427bgb20cgbcc07cf3fcf0",
+        Fallback = "This is the item I'm already working on, choose another!",
+    },
+    Combine_ItemAddedHasTooManyMods = {
+        Key = "AMER_UI_Greatforge_Combine_ItemAddedHasTooManyMods",
+        Handle = "ha646e8b5g512bg48d8gbe62g266cf5bdd602",
+        Fallback = "I can only combine an item that has one non-implicit property.<br>This item has too many.",
+    },
+    Combine_ItemAddedHasNoMods = {
+        Key = "AMER_UI_Greatforge_Combine_ItemAddedHasNoMods",
+        Handle = "he6e156f7g8632g426eg92a6gc430a92fad05",
+        Fallback = "I can only combine an item that has one non-implicit property.<br>This item has none.",
+    },
+    Combine_ItemAddedHasSamePrefix = {
+        Key = "AMER_UI_Greatforge_Combine_ItemAddedHasSamePrefix",
+        Handle = "ha00a2258gb96bg48deg8c17ga426b6b34839",
+        Fallback = "My item already has this property, I cannot add it again.",
+    },
+    Combine_ItemAddedHasExcludedPrefix = {
+        Key = "AMER_UI_Greatforge_Combine_ItemAddedHasExcludedPrefix",
+        Handle = "h5a12fac9g25b1g4d6cg8ca4g928be17629d2",
+        Fallback = "My item already has a property that prevents adding this one.",
+    },
+    -- The Fail_* keys have no handles even in EE2's own bank.
+    Combine_Fail_Level = {
+        Key = "AMER_UI_Greatforge_Combine_Fail_Level",
+        Fallback = "My item needs to be a higher level to combine this property.",
+    },
+    Combine_Fail_ItemTypes = {
+        Key = "AMER_UI_Greatforge_Combine_Fail_ItemTypes",
+        Fallback = "I cannot combine this because my item's type does not normally appear with this property.",
+    },
+    Combine_Fail_Value = {
+        Key = "AMER_UI_Greatforge_Combine_Fail_Value",
+        Fallback = "I cannot combine this because my item's type does not support such a large amount of this property.",
+    },
 }
+
+---Resolves one of EE2's strings: the live handle first, then the live key,
+---then the bundled fallback copy.
+---@param name string A QuickForge.EE2_STRINGS key.
+---@return string
+function QuickForge.ResolveEE2String(name)
+    local entry = QuickForge.EE2_STRINGS[name]
+    if not entry then return "" end
+
+    if entry.Handle then
+        local text = Ext.L10N.GetTranslatedString(entry.Handle)
+        if text and text ~= "" and text ~= entry.Handle then
+            return text
+        end
+    end
+    if entry.Key then
+        local text = Ext.L10N.GetTranslatedStringFromKey(entry.Key)
+        if text and text ~= "" and text ~= entry.Key then
+            return text
+        end
+    end
+    return entry.Fallback
+end
 
 ---------------------------------------------
 -- NET MESSAGES

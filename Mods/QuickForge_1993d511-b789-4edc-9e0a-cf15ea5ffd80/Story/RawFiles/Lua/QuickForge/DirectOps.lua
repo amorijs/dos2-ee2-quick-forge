@@ -87,6 +87,16 @@ local function ToOsirisInteger(real)
     return value
 end
 
+---A string from EE2's own Osiris string cache (its framework for strings
+---the engine's TSK feature cannot serve, e.g. messages with dynamic
+---parts), in EE2's configured language.
+---@param key string
+---@return string?
+local function GetEE2CachedString(key)
+    local rows = Osi.DB_AMER_GEN_TSK_Cache:Get(key, nil)
+    return rows and rows[1] and rows[1][2]
+end
+
 ---@return QuickForge.DirectOpState
 function QuickForge._GetDirectOpState()
     local sessions = Osi.DB_AMER_UI_UsersInUI:Get(nil, GREATFORGE_UI, nil)
@@ -282,6 +292,18 @@ function QuickForge._BuildMasterworkRows(specs)
             itemLevel = itemLevel,
         })
 
+        -- The greyed row's hover reason, in EE2's own words. The level
+        -- message is built exactly as EE2 builds it: its Osiris string
+        -- cache entry with the required level appended.
+        local reasonText = nil
+        if class.reason == "maxed" then
+            reasonText = QuickForge.ResolveEE2String("Masterwork_PropertyMaxed")
+        elseif class.reason == "level_too_high" then
+            local prefix = GetEE2CachedString("AMER_UI_Greatforge_Masterwork_LevelTooHigh")
+                or QuickForge.ResolveEE2String("Masterwork_LevelTooHigh")
+            reasonText = prefix .. tostring(ToOsirisInteger(uptierLevel))
+        end
+
         local cost = nil
         if deltamod ~= "NONE"
             and Osi.QRY_AMER_UI_Greatforge_Masterwork_InitConfirmPage_GetCostInt(
@@ -298,6 +320,7 @@ function QuickForge._BuildMasterworkRows(specs)
             Cost = cost,
             Eligible = class.eligible,
             Reason = class.reason,
+            ReasonText = reasonText,
         })
         seeds[prefix] = {Index = index, Deltamod = deltamod, UptierLevel = uptierLevel}
     end

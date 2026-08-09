@@ -188,14 +188,18 @@ end
 
 ---The reason line shown when hovering a greyed row — EE2's own reason
 ---strings, the same ones its Greatforge page would box at the player.
+---The server resolves the text (it has EE2's Osiris string cache); the
+---client-side chain only covers a reply without one.
 ---@param row QuickForge.PickerRow
 ---@return string
 function UI._GetRowReason(row)
+    if row.ReasonText then
+        return row.ReasonText
+    end
     if row.Reason == "maxed" then
-        return Text.GetTranslatedString("AMER_UI_Greatforge_Masterwork_PropertyMaxed", "")
+        return QuickForge.ResolveEE2String("Masterwork_PropertyMaxed")
     elseif row.Reason == "level_too_high" then
-        return Text.GetTranslatedString("AMER_UI_Greatforge_Masterwork_LevelTooHigh", "")
-            .. tostring(row.UptierLevel)
+        return QuickForge.ResolveEE2String("Masterwork_LevelTooHigh") .. tostring(row.UptierLevel)
     end
     return ""
 end
@@ -387,9 +391,8 @@ function UI._ShowDonorRefusal(droppedItem)
     local body
     if reason == "QuickForge_Equipped" then
         body = QuickForge.TranslatedStrings.Error_DonorEquipped:GetString()
-    elseif reason then
-        body = Text.GetTranslatedString("AMER_UI_Greatforge_Combine_" .. reason,
-            QuickForge.TranslatedStrings.Error_DonorInvalid:GetString())
+    elseif reason and QuickForge.EE2_STRINGS["Combine_" .. reason] then
+        body = QuickForge.ResolveEE2String("Combine_" .. reason)
     else
         body = QuickForge.TranslatedStrings.Error_DonorInvalid:GetString()
     end
@@ -460,13 +463,15 @@ function UI.Open(item, preview)
     UI.Panel.HeaderText:SetText(GetOptionLabel(preview.Option))
     UI.ItemSlot:SetItem(item)
 
-    -- EE2's options resolve by string handle (their keys live only in a key
-    -- bank the extender's key lookup misses); Epip's options register their
-    -- keys at runtime and resolve by key.
-    local descHandle = QuickForge.EE2_DESC_HANDLES[preview.Option]
-    local description = descHandle
-        and Text.GetTranslatedString(descHandle, "")
-        or Text.GetTranslatedString("AMER_UI_Greatforge_Desc_" .. preview.Option, "")
+    -- EE2's options resolve through the layered EE2-string chain; Epip's
+    -- options (AddSockets, PIP_Engrave) register their keys at runtime and
+    -- resolve by key.
+    local description
+    if QuickForge.EE2_STRINGS["Desc_" .. preview.Option] then
+        description = QuickForge.ResolveEE2String("Desc_" .. preview.Option)
+    else
+        description = Text.GetTranslatedString("AMER_UI_Greatforge_Desc_" .. preview.Option, "")
+    end
     if preview.DescriptionSuffix then
         description = description .. preview.DescriptionSuffix
     end
