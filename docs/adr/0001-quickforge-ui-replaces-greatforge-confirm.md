@@ -42,12 +42,27 @@ reuses `QRY_AMER_UI_Greatforge_InvalidSelection`; costs reuse
 `GetCostInt` query, since EE2's runtime path reads that number back out of
 rendered UI text). Details: `docs/research/greatforge-programmatic-commit.md`.
 
-**One documented exception to the never-reimplement guardrail:** Drill
-Sockets validity uses QuickForge's own socket-limit rule (`Core.lua`) instead
-of EE2/Epip's `ItemHasMaxSockets`, because that check reads the first row of
-the bench DB *globally* — bench-coupled and multiplayer-unsafe. The guardrail
-exists to stop our UI lying at commit time; here EE2's own implementation is
-the unsafe one.
+**Documented exceptions to the never-reimplement guardrail:**
+
+1. Drill Sockets validity uses QuickForge's own socket-limit rule
+   (`Core.lua`) instead of EE2/Epip's `ItemHasMaxSockets`, because that
+   check reads the first row of the bench DB *globally* — bench-coupled and
+   multiplayer-unsafe. The guardrail exists to stop our UI lying at commit
+   time; here EE2's own implementation is the unsafe one.
+2. *(Amended for phase 2, 2026-08-08)* Combine's donor filtering calls
+   EE2's underlying always-active checks (`IterateMods_NotImplicit`,
+   `PrefixesExclusive`, `CanItemRollPrefixValue`) but owns their
+   *composition* (`Core.EvaluateDonor`): the check order, the
+   one-property gates, and EE2's own rarity-failure pass-through, mirrored
+   from `AMER_GLO_UI_Greatforge_Internal.txt:1946-2067`. EE2's wrapper
+   queries are page-driven and open a message box per failed candidate —
+   unusable for silently filtering a list. Every fact still comes from
+   EE2's queries; commits re-validate the chosen Donor through the same
+   composition plus EE2's own party-membership predicate. Similarly,
+   Masterwork's *display* eligibility (`Core.ClassifyMasterworkRow`)
+   mirrors EE2's two selection gates for greying rows, while commits
+   re-run EE2's own `PropertyMaxed`/`PropertyLevelTooHigh` queries as the
+   authority.
 
 As a structural safety measure, Direct Operations refuse (offering the Jump)
 while any player is inside a real Greatforge session, so the

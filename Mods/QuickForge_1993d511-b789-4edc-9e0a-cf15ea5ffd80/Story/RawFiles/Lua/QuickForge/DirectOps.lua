@@ -270,7 +270,7 @@ function QuickForge._BuildMasterworkRows(specs)
     if not validated or not validated[1] then return nil end
 
     local itemLevel = ToOsirisInteger(specs.Level)
-    local rows, raws = {}, {}
+    local rows, seeds = {}, {}
     for _, v in ipairs(validated) do
         local index, prefix, deltamod, value = v[2], v[3], v[4], v[5]
         local uptierLevel, benchedModLevel = v[6], v[7]
@@ -299,10 +299,10 @@ function QuickForge._BuildMasterworkRows(specs)
             Eligible = class.eligible,
             Reason = class.reason,
         })
-        raws[prefix] = {Index = index, Deltamod = deltamod, UptierLevel = uptierLevel}
+        seeds[prefix] = {Index = index, Deltamod = deltamod, UptierLevel = uptierLevel}
     end
-    table.sort(rows, function(a, b) return (raws[a.Key].Index) < (raws[b.Key].Index) end)
-    return rows, raws
+    table.sort(rows, function(a, b) return (seeds[a.Key].Index) < (seeds[b.Key].Index) end)
+    return rows, seeds
 end
 
 ---Builds the Cull picker rows: the item's Properties as EE2 counted them.
@@ -315,7 +315,7 @@ function QuickForge._BuildKeepRows()
     local counted = Osi.DB_AMER_Detamods_OUTPUT_CountedMods:Get(nil, nil, nil, nil, nil)
     if not counted or not counted[1] then return nil end
 
-    local rows, raws = {}, {}
+    local rows, seeds = {}, {}
     for _, row in ipairs(counted) do
         local index, prefix, deltamod, value = row[1], row[3], row[4], row[5]
         table.insert(rows, {
@@ -324,9 +324,9 @@ function QuickForge._BuildKeepRows()
             Current = value,
             Eligible = true,
         })
-        raws[prefix] = {Index = index, Deltamod = deltamod}
+        seeds[prefix] = {Index = index, Deltamod = deltamod}
     end
-    return rows, raws
+    return rows, seeds
 end
 
 ---------------------------------------------
@@ -427,7 +427,7 @@ end
 function QuickForge._BuildDonorRows(char, item, specs)
     local context = QuickForge._GetCombineContext(specs)
 
-    local rows, raws, invalid = {}, {}, {}
+    local rows, seeds, invalid = {}, {}, {}
     local candidates = Item.GetItemsInPartyInventory(char, function(candidate)
         return candidate.Stats ~= nil and Item.IsEquipment(candidate)
     end, true)
@@ -444,13 +444,13 @@ function QuickForge._BuildDonorRows(char, item, specs)
                     Prefix = donorPrefix,
                     Eligible = true,
                 })
-                raws[candidate.MyGuid] = {Guid = candidate.MyGuid, Deltamod = donorDeltamod}
+                seeds[candidate.MyGuid] = {Guid = candidate.MyGuid, Deltamod = donorDeltamod}
             else
                 invalid[tostring(candidate.NetID)] = verdict.reason
             end
         end
     end
-    return rows, raws, invalid
+    return rows, seeds, invalid
 end
 
 ---Reserves an invisible helper container to stand in for the forge's craft
@@ -499,6 +499,9 @@ end
 -- later. Each watch token keeps the goal alive across one such round-trip.
 ---@type {Done: boolean}[]
 QuickForge._PendingRebuilds = {}
+-- A dropped round-trip left a request row behind that could not be swept
+-- yet because another rebuild was still in flight.
+QuickForge._RebuildSweepDeferred = false
 
 ---Starts watching one pending regeneration round-trip. The goal is held
 ---active until EE2's return rule fires — or until the timeout, after which
@@ -513,6 +516,14 @@ function QuickForge._BeginRebuildWatch()
     end)
 end
 
+---Sweeps every leftover Cull regeneration request row of ours. The rows
+---are only distinguishable by EE2's global request counter, so this may
+---run only while no rebuild of ours is still in flight.
+function QuickForge._SweepRebuildRequests()
+    Osi.DB_AMER_UI_Greatforge_RemoveMods_NewItemRequest:Delete(
+        nil, INSTANCE, nil, nil, nil, nil, nil, nil, nil)
+end
+
 ---@param token {Done: boolean}
 ---@param dropped boolean True when the round-trip timed out instead of returning.
 function QuickForge._FinishRebuildWatch(token, dropped)
@@ -525,9 +536,16 @@ function QuickForge._FinishRebuildWatch(token, dropped)
             break
         end
     end
+    -- Sweep only once nothing else is in flight: request rows are not
+    -- per-watch distinguishable, and a broad sweep here would wipe a
+    -- concurrent rebuild's live request, stranding its item. A drop that
+    -- cannot sweep yet defers to whichever finish empties the list.
     if dropped then
-        Osi.DB_AMER_UI_Greatforge_RemoveMods_NewItemRequest:Delete(
-            nil, INSTANCE, nil, nil, nil, nil, nil, nil, nil)
+        QuickForge._RebuildSweepDeferred = true
+    end
+    if QuickForge._RebuildSweepDeferred and not QuickForge._PendingRebuilds[1] then
+        QuickForge._SweepRebuildRequests()
+        QuickForge._RebuildSweepDeferred = false
     end
     QuickForge._TryCompleteInternalGoal()
 end
@@ -695,19 +713,19 @@ function QuickForge._PrepareCommit(char, item, option, specs, selectionKey)
     local picker = Core.GetPicker(option)
 
     if picker == "property_uptier" then
-        local rows, raws = QuickForge._BuildMasterworkRows(specs)
+        local rows, seeds = QuickForge._BuildMasterworkRows(specs)
         if not rows then return "error" end
         local row = Core.FindPickerRow(rows, selectionKey)
         if not row then return "stale_selection" end
-        local raw = raws[row.Key]
+        local seed = seeds[row.Key]
         -- EE2's own selection gates, re-run at commit time; each opens its
         -- reason box on the character's client when it refuses (the same
         -- boxes the Greatforge page shows).
-        if Osi.QRY_AMER_UI_Greatforge_Masterwork_PropertyMaxed(char.MyGuid, raw.Deltamod) == true then
+        if Osi.QRY_AMER_UI_Greatforge_Masterwork_PropertyMaxed(char.MyGuid, seed.Deltamod) == true then
             return "invalid"
         end
         if Osi.QRY_AMER_UI_Greatforge_Masterwork_PropertyLevelTooHigh(
-            char.MyGuid, specs.Level, raw.UptierLevel) == true then
+            char.MyGuid, specs.Level, seed.UptierLevel) == true then
             return "invalid"
         end
         local mat = QuickForge._GetOptionMaterial(option)
@@ -717,13 +735,13 @@ function QuickForge._PrepareCommit(char, item, option, specs, selectionKey)
             MatType = mat.MatType,
             Root = mat.Root,
             Seed = function()
-                Osi.DB_AMER_UI_Greatforge_Masterwork_SelectedMod(INSTANCE, raw.Index)
+                Osi.DB_AMER_UI_Greatforge_Masterwork_SelectedMod(INSTANCE, seed.Index)
             end,
         }
     end
 
     if picker == "property_keep" then
-        local rows, raws = QuickForge._BuildKeepRows()
+        local rows, seeds = QuickForge._BuildKeepRows()
         if not rows then return "error" end
         local row = Core.FindPickerRow(rows, selectionKey)
         if not row then return "stale_selection" end
@@ -737,11 +755,11 @@ function QuickForge._PrepareCommit(char, item, option, specs, selectionKey)
                 -- The full row list plus the kept row's index, exactly what
                 -- EE2's confirm page would have seeded; DoCraft joins
                 -- SelectedMod -> ModsOfItem and runs its own cleanup.
-                for _, seeded in pairs(raws) do
+                for _, seeded in pairs(seeds) do
                     Osi.DB_AMER_UI_Greatforge_RemoveMods_ModsOfItem(
                         INSTANCE, seeded.Index, seeded.Deltamod)
                 end
-                Osi.DB_AMER_UI_Greatforge_RemoveMods_SelectedMod(INSTANCE, raws[row.Key].Index)
+                Osi.DB_AMER_UI_Greatforge_RemoveMods_SelectedMod(INSTANCE, seeds[row.Key].Index)
             end,
             OnCrafted = function()
                 -- The old item is gone and the regenerated one is in
@@ -809,12 +827,23 @@ end)
 Net.RegisterListener(QuickForge.NETMSG_COMMIT, function(payload)
     local char, item, option = GetRequestArgs(payload)
     if not char then return end
-    local selectionKey = payload.SelectionKey
-    if selectionKey ~= nil and type(selectionKey) ~= "string" then return end
-    if Core.GetPicker(option) ~= nil and selectionKey == nil then return end
     -- Captured up front: Dismantle/Transmute destroy the item entity during
     -- the commit, invalidating it before the reply is built.
     local itemNetID = item.NetID
+
+    -- A picker commit without a well-formed selection cannot proceed, but
+    -- must still reply (never-silent): the client is waiting on this to
+    -- re-enable its window.
+    local selectionKey = payload.SelectionKey
+    if (selectionKey ~= nil and type(selectionKey) ~= "string")
+        or (Core.GetPicker(option) ~= nil and selectionKey == nil) then
+        Net.PostToCharacter(char, QuickForge.NETMSG_COMMIT_RESULT, {
+            ItemNetID = itemNetID,
+            Option = option,
+            Outcome = "error",
+        })
+        return
+    end
 
     local outcome = QuickForge._RunBenched(char, item, option, function(specs)
         local refusal, plan = QuickForge._PrepareCommit(char, item, option, specs, selectionKey)
@@ -877,7 +906,6 @@ Ext.Osiris.RegisterListener("SavegameLoaded", 4, "after", function(_, _, _, _)
         Osi.DB_AMER_UI_Greatforge_CraftObject_Reserved:Delete(INSTANCE, nil)
     end
     QuickForge._ClearSeededRows()
-    Osi.DB_AMER_UI_Greatforge_RemoveMods_NewItemRequest:Delete(
-        nil, INSTANCE, nil, nil, nil, nil, nil, nil, nil)
+    QuickForge._SweepRebuildRequests()
     QuickForge._TryCompleteInternalGoal()
 end)
