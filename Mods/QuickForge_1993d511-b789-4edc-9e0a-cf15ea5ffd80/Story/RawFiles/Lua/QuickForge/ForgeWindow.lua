@@ -69,20 +69,25 @@ function UI._Initialize()
     funds:SetPositionRelativeToParent("Bottom", 0, -75)
     UI.FundsText = funds
 
-    local confirm = ButtonPrefab.Create(UI, "Confirm", bg, ButtonPrefab.STYLES.GreenMedium)
+    -- A horizontal list lays the pair out side by side regardless of the
+    -- styles' texture sizes (Epip's InputBinder pattern).
+    local buttonList = bg:AddChild("ButtonList", "GenericUI_Element_HorizontalList")
+
+    local confirm = ButtonPrefab.Create(UI, "Confirm", buttonList, ButtonPrefab.STYLES.GreenSmallTextured)
     confirm:SetLabel(Text.CommonStrings.Confirm)
-    confirm:SetPositionRelativeToParent("Bottom", -80, -25)
     confirm.Events.Pressed:Subscribe(function(_)
         UI._ConfirmPressed()
     end)
     UI.ConfirmButton = confirm
 
-    local cancel = ButtonPrefab.Create(UI, "Cancel", bg, ButtonPrefab.STYLES.MediumRed)
+    local cancel = ButtonPrefab.Create(UI, "Cancel", buttonList, ButtonPrefab.STYLES.SmallRed)
     cancel:SetLabel(Text.CommonStrings.Cancel)
-    cancel:SetPositionRelativeToParent("Bottom", 80, -25)
     cancel.Events.Pressed:Subscribe(function(_)
         UI.Close()
     end)
+
+    buttonList:RepositionElements()
+    buttonList:SetPositionRelativeToParent("Bottom", 0, -30)
 
     UI:SetPanelSize(UI.PANEL_SIZE)
     UI._Initialized = true
