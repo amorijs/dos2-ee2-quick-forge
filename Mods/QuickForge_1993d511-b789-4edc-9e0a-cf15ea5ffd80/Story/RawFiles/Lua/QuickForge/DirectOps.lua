@@ -70,6 +70,18 @@ local function GetOutputValue(outputDB)
     return rows and rows[1] and rows[1][1]
 end
 
+---Osiris's own REAL->INTEGER conversion, exactly as EE2's scripts convert
+---(Integer(_Real, _Int)) — no drift from Lua rounding.
+---@param real number
+---@return integer
+local function ToOsirisInteger(real)
+    local converted, value = pcall(Osi.Integer, real)
+    if not converted or not value then
+        value = math.floor(real)
+    end
+    return value
+end
+
 ---@return QuickForge.DirectOpState
 function QuickForge._GetDirectOpState()
     local sessions = Osi.DB_AMER_UI_UsersInUI:Get(nil, GREATFORGE_UI, nil)
@@ -132,6 +144,12 @@ end
 function QuickForge._ClearSeededRows()
     Osi.DB_AMER_UI_Greatforge_BenchedItem:Delete(INSTANCE, nil, nil, nil, nil, nil, nil, nil, nil)
     Osi.DB_AMER_UI_Greatforge_SelectedOption_Cost:Delete(INSTANCE, nil, nil, nil)
+    -- Masterwork picker rows/selection. EE2's DoCraft deletes the selection
+    -- on success; the validated rows (and both, on a refused commit) are
+    -- page-leave cleanup in EE2's UI, so here they are ours.
+    Osi.DB_AMER_UI_Greatforge_Masterwork_ValidatedMods:Delete(INSTANCE,
+        nil, nil, nil, nil, nil, nil, nil, nil, nil)
+    Osi.DB_AMER_UI_Greatforge_Masterwork_SelectedMod:Delete(INSTANCE, nil)
 end
 
 ---Whether EE2 (or, for AddSockets, Core's own socket rule) rejects the
@@ -188,7 +206,7 @@ end
 ---The player's funds matching a cost's material, measured exactly as EE2's
 ---funds check measures them (user-scoped, bags excluded).
 ---@param char EsvCharacter
----@param cost QuickForge.OperationCost
+---@param cost {MatType: string, Root: string}
 ---@return integer
 function QuickForge._GetFunds(char, cost)
     if cost.MatType == "Gold" then
@@ -198,6 +216,82 @@ function QuickForge._GetFunds(char, cost)
         return 0
     end
     return GetOutputValue(Osi.DB_AMER_GEN_OUTPUT_Integer) or 0
+end
+
+---The material an option charges, from EE2's static cost list — without
+---computing an amount (Masterwork's amounts are per-Property).
+---@param option string
+---@return {MatType: string, Root: string}?
+function QuickForge._GetOptionMaterial(option)
+    local costRows = Osi.DB_AMER_UI_Greatforge_Option_Cost:Get(option, nil, nil, nil)
+    local costRow = costRows and costRows[1]
+    if not costRow then return nil end
+    return {MatType = costRow[2], Root = costRow[3]}
+end
+
+---------------------------------------------
+-- PICKER ROWS
+---------------------------------------------
+
+---Builds the Masterwork picker rows from EE2's own uptier derivation:
+---QRY_..._ValidateMods consumes the CountedMods left behind by EE2's
+---InvalidSelection("Masterwork") run (which _RunBenched just performed) and
+---writes Masterwork_ValidatedMods; each row's cost comes from EE2's own
+---GetCostInt query (the number EE2's runtime reads back out of rendered UI
+---text — unreadable here, so computed via the same query EE2's page uses).
+---Requires the bench seeded, the internal goal active, and EE2's
+---InvalidSelection("Masterwork") to have just run for this item.
+---@param specs QuickForge.ItemSpecs
+---@return QuickForge.PickerRow[]?, table<string, {Index: integer, Deltamod: string, UptierLevel: number}>?
+function QuickForge._BuildMasterworkRows(specs)
+    -- The item's current value per property, from the CountedMods snapshot
+    -- (EE2 de-duplicates per prefix keeping the highest value).
+    local currentByPrefix = {}
+    local counted = Osi.DB_AMER_Detamods_OUTPUT_CountedMods:Get(nil, nil, nil, nil, nil)
+    for _, row in ipairs(counted or {}) do
+        currentByPrefix[row[3]] = row[5]
+    end
+
+    Osi.QRY_AMER_UI_Greatforge_Masterwork_InitConfirmPage_ValidateMods(
+        INSTANCE, specs.Slot, specs.SubType, specs.Handedness)
+    local validated = Osi.DB_AMER_UI_Greatforge_Masterwork_ValidatedMods:Get(
+        INSTANCE, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+    if not validated or not validated[1] then return nil end
+
+    local itemLevel = ToOsirisInteger(specs.Level)
+    local rows, raws = {}, {}
+    for _, v in ipairs(validated) do
+        local index, prefix, deltamod, value = v[2], v[3], v[4], v[5]
+        local uptierLevel, benchedModLevel = v[6], v[7]
+        local deltamodRarity, benchedRarity, decayChance = v[8], v[9], v[10]
+
+        local class = Core.ClassifyMasterworkRow({
+            uptierDeltamod = deltamod,
+            uptierLevel = ToOsirisInteger(uptierLevel),
+            itemLevel = itemLevel,
+        })
+
+        local cost = nil
+        if deltamod ~= "NONE"
+            and Osi.QRY_AMER_UI_Greatforge_Masterwork_InitConfirmPage_GetCostInt(
+                uptierLevel, benchedModLevel, deltamodRarity, benchedRarity, decayChance) then
+            cost = GetOutputValue(Osi.DB_AMER_GEN_OUTPUT_Integer)
+        end
+
+        table.insert(rows, {
+            Key = prefix,
+            Prefix = prefix,
+            Current = currentByPrefix[prefix],
+            Uptiered = deltamod ~= "NONE" and value or nil,
+            UptierLevel = ToOsirisInteger(uptierLevel),
+            Cost = cost,
+            Eligible = class.eligible,
+            Reason = class.reason,
+        })
+        raws[prefix] = {Index = index, Deltamod = deltamod, UptierLevel = uptierLevel}
+    end
+    table.sort(rows, function(a, b) return (raws[a.Key].Index) < (raws[b.Key].Index) end)
+    return rows, raws
 end
 
 ---Reserves an invisible helper container to stand in for the forge's craft
@@ -317,18 +411,94 @@ function QuickForge._RunBenched(char, item, option, stage)
     return outcome, extra
 end
 
+---Builds the preview reply's cost/picker fields for an option.
+---@param char EsvCharacter
+---@param option string
+---@param specs QuickForge.ItemSpecs
+---@return QuickForge.OperationOutcome, table?
+function QuickForge._BuildPreview(char, option, specs)
+    local picker = Core.GetPicker(option)
+
+    if picker == "property_uptier" then
+        -- Per-row costs; the window has no flat cost line until a pick.
+        local rows = QuickForge._BuildMasterworkRows(specs)
+        local mat = QuickForge._GetOptionMaterial(option)
+        if not rows or not mat then return "error" end
+        return "ok", {
+            MatType = mat.MatType,
+            Funds = QuickForge._GetFunds(char, mat),
+            Rows = rows,
+        }
+    end
+
+    local cost = QuickForge._GenerateCost(option, specs)
+    if not cost then return "error" end
+    return "ok", {
+        MatType = cost.MatType,
+        Cost = cost.Amount,
+        Funds = QuickForge._GetFunds(char, cost),
+    }
+end
+
+---What a commit charges and seeds. Charged amounts always come from EE2's
+---queries run now, never from the client's preview.
+---@class QuickForge.CommitPlan
+---@field Cost integer
+---@field MatType string
+---@field Root string
+---@field Seed fun()? Seeds the option's selection DBs just before OptionRequested.
+
+---Resolves a commit's plan, re-deriving and re-validating any picker
+---selection against EE2's current data. Returns a refusal outcome instead
+---when the commit may not proceed.
+---@param char EsvCharacter
+---@param option string
+---@param specs QuickForge.ItemSpecs
+---@param selectionKey string?
+---@return QuickForge.OperationOutcome? refusal
+---@return QuickForge.CommitPlan?
+function QuickForge._PrepareCommit(char, option, specs, selectionKey)
+    local picker = Core.GetPicker(option)
+
+    if picker == "property_uptier" then
+        local rows, raws = QuickForge._BuildMasterworkRows(specs)
+        if not rows then return "error" end
+        local row = Core.FindPickerRow(rows, selectionKey)
+        if not row then return "stale_selection" end
+        local raw = raws[row.Key]
+        -- EE2's own selection gates, re-run at commit time; each opens its
+        -- reason box on the character's client when it refuses (the same
+        -- boxes the Greatforge page shows).
+        if Osi.QRY_AMER_UI_Greatforge_Masterwork_PropertyMaxed(char.MyGuid, raw.Deltamod) == true then
+            return "invalid"
+        end
+        if Osi.QRY_AMER_UI_Greatforge_Masterwork_PropertyLevelTooHigh(
+            char.MyGuid, specs.Level, raw.UptierLevel) == true then
+            return "invalid"
+        end
+        local mat = QuickForge._GetOptionMaterial(option)
+        if not row.Cost or not mat then return "error" end
+        return nil, {
+            Cost = row.Cost,
+            MatType = mat.MatType,
+            Root = mat.Root,
+            Seed = function()
+                Osi.DB_AMER_UI_Greatforge_Masterwork_SelectedMod(INSTANCE, raw.Index)
+            end,
+        }
+    end
+
+    local cost = QuickForge._GenerateCost(option, specs)
+    if not cost then return "error" end
+    return nil, {Cost = cost.Amount, MatType = cost.MatType, Root = cost.Root}
+end
+
 Net.RegisterListener(QuickForge.NETMSG_PREVIEW_REQUEST, function(payload)
     local char, item, option = GetRequestArgs(payload)
     if not char then return end
 
     local outcome, costFields = QuickForge._RunBenched(char, item, option, function(specs)
-        local cost = QuickForge._GenerateCost(option, specs)
-        if not cost then return "error" end
-        return "ok", {
-            MatType = cost.MatType,
-            Cost = cost.Amount,
-            Funds = QuickForge._GetFunds(char, cost),
-        }
+        return QuickForge._BuildPreview(char, option, specs)
     end)
 
     local reply = {
@@ -345,16 +515,22 @@ end)
 Net.RegisterListener(QuickForge.NETMSG_COMMIT, function(payload)
     local char, item, option = GetRequestArgs(payload)
     if not char then return end
+    local selectionKey = payload.SelectionKey
+    if selectionKey ~= nil and type(selectionKey) ~= "string" then return end
+    if Core.GetPicker(option) ~= nil and selectionKey == nil then return end
     -- Captured up front: Dismantle/Transmute destroy the item entity during
     -- the commit, invalidating it before the reply is built.
     local itemNetID = item.NetID
 
     local outcome = QuickForge._RunBenched(char, item, option, function(specs)
-        local cost = QuickForge._GenerateCost(option, specs)
-        local container = cost and QuickForge._ReserveCraftContainer() or nil
-        if not cost or not container then return "error" end
+        local refusal, plan = QuickForge._PrepareCommit(char, option, specs, selectionKey)
+        if refusal then return refusal end
 
-        Osi.DB_AMER_UI_Greatforge_SelectedOption_Cost(INSTANCE, cost.MatType, cost.Root, cost.Amount)
+        local container = QuickForge._ReserveCraftContainer()
+        if not container then return "error" end
+
+        Osi.DB_AMER_UI_Greatforge_SelectedOption_Cost(INSTANCE, plan.MatType, plan.Root, plan.Cost)
+        if plan.Seed then plan.Seed() end
 
         QuickForge._CraftWatch = {}
         Osi.PROC_AMER_UI_Greatforge_OptionRequested(INSTANCE, char.MyGuid, option)

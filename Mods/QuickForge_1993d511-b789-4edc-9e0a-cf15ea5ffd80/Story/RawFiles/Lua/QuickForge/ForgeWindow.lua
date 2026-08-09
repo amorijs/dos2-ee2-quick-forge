@@ -2,11 +2,15 @@
 -- QuickForge client: the Forge Window — the confirm layer for a Direct
 -- Operation. Item icon with native tooltip, EE2's own option description,
 -- EE2-computed cost next to the player's matching funds, Confirm/Cancel.
+-- Picker options add a selectable list (properties or Donors) between the
+-- description and the cost line; nothing is pre-selected and Confirm stays
+-- disabled until the player picks an eligible, affordable row.
 -- Everything shown is read live from EE2's data via the server preview;
 -- the window is only a preview — the server re-validates at commit time.
 ---------------------------------------------
 
 local QuickForge = Epip.GetFeature("QuickForge", "QuickForge", true) ---@type Features.QuickForge
+local Core = QuickForge.Core
 local Generic = Client.UI.Generic
 local MessageBox = Client.UI.MessageBox
 local Notification = Client.UI.Notification
@@ -22,15 +26,29 @@ local FAILURE_MSGBOX_ID = "QuickForge_OperationRefused"
 local MSGBOX_BUTTON_JUMP = 1
 local MSGBOX_BUTTON_DISMISS = 2
 
+local ROW_COLOR_NORMAL = Color.LARIAN.LIGHT_GRAY
+local ROW_COLOR_SELECTED = Color.LARIAN.GOLD
+local ROW_COLOR_INELIGIBLE = Color.LARIAN.DARK_GRAY
+local ROW_ALPHA_NORMAL = 0.2
+local ROW_ALPHA_HOVER = 0.4
+local ROW_ALPHA_SELECTED = 0.5
+local ROW_ALPHA_INELIGIBLE = 0.1
+
 local UI = Generic.Create("QuickForge_ForgeWindow", {Visible = false})
 UI.PANEL_SIZE = V(400, 400)
+UI.PANEL_SIZE_PICKER = V(400, 610)
 UI.HEADER_SIZE = V(380, 50)
 UI.DESC_SIZE = V(340, 120)
 UI.LINE_SIZE = V(340, 30)
+UI.PICKER_SIZE = V(340, 230)
+UI.PICKER_ROW_SIZE = V(320, 32)
 UI._Initialized = false
 ---The previewed operation awaiting confirmation, if the window is open.
----@type {ItemNetID: NetId, Option: string}?
+---@type {ItemNetID: NetId, Option: string, Rows: QuickForge.PickerRow[]?, FlatCost: integer?, Funds: integer, MatType: string?, SelectedKey: string?}?
 UI._Current = nil
+---Per-row UI pieces of the open picker, by row key.
+---@type table<string, {Background: GenericUI_Element_TiledBackground, Text: GenericUI_Prefab_Text, Row: QuickForge.PickerRow}>
+UI._RowElements = {}
 QuickForge.ForgeWindow = UI
 
 ---@param option string Greatforge option ID.
@@ -61,6 +79,15 @@ function UI._Initialize()
     desc:GetMainElement():SetWordWrap(true)
     UI.DescriptionText = desc
 
+    -- Picker list for the options that need a selection; hidden otherwise.
+    -- Positioned explicitly: relative-to-parent anchoring reads the list's
+    -- width at call time, which is 0 while it has no rows.
+    local picker = bg:AddChild("PickerList", "GenericUI_Element_ScrollList")
+    picker:SetFrame(UI.PICKER_SIZE:unpack())
+    picker:SetMouseWheelEnabled(true)
+    picker:SetPosition((UI.PANEL_SIZE[1] - UI.PICKER_ROW_SIZE[1]) / 2, 280)
+    UI.PickerList = picker
+
     local cost = TextPrefab.Create(UI, "CostLine", bg, "", "Center", UI.LINE_SIZE)
     cost:SetPositionRelativeToParent("Bottom", 0, -105)
     UI.CostText = cost
@@ -72,6 +99,7 @@ function UI._Initialize()
     -- A horizontal list lays the pair out side by side regardless of the
     -- styles' texture sizes (Epip's InputBinder pattern).
     local buttonList = bg:AddChild("ButtonList", "GenericUI_Element_HorizontalList")
+    UI.ButtonList = buttonList
 
     local confirm = ButtonPrefab.Create(UI, "Confirm", buttonList, ButtonPrefab.STYLES.GreenSmallTextured)
     confirm:SetLabel(Text.CommonStrings.Confirm)
@@ -93,29 +121,186 @@ function UI._Initialize()
     UI._Initialized = true
 end
 
----Opens the window for a previewed operation.
----@param item EclItem
----@param option string
----@param matType string
----@param cost integer
----@param funds integer
-function UI.Open(item, option, matType, cost, funds)
-    UI._Initialize()
+---Sizes the panel for the option at hand and re-anchors the bottom-row
+---elements (bottom-relative positions are computed at call time, not live).
+---@param hasPicker boolean
+function UI._Layout(hasPicker)
+    local size = hasPicker and UI.PANEL_SIZE_PICKER or UI.PANEL_SIZE
+    UI.Panel.Background:SetBackground("FormattedTooltip", size:unpack())
+    UI:SetPanelSize(size)
+    UI.PickerList:SetVisible(hasPicker)
+    UI.CostText:SetPositionRelativeToParent("Bottom", 0, -105)
+    UI.FundsText:SetPositionRelativeToParent("Bottom", 0, -75)
+    UI.ButtonList:SetPositionRelativeToParent("Bottom", 0, -30)
+end
 
-    UI.Panel.HeaderText:SetText(GetOptionLabel(option))
-    UI.ItemSlot:SetItem(item)
-    UI.DescriptionText:SetText(Text.GetTranslatedString("AMER_UI_Greatforge_Desc_" .. option, ""))
+---------------------------------------------
+-- PICKER
+---------------------------------------------
 
-    local costTSK = matType == "Gold"
+---The reason line shown when hovering a greyed row — EE2's own reason
+---strings, the same ones its Greatforge page would box at the player.
+---@param row QuickForge.PickerRow
+---@return string
+function UI._GetRowReason(row)
+    if row.Reason == "maxed" then
+        return Text.GetTranslatedString("AMER_UI_Greatforge_Masterwork_PropertyMaxed", "")
+    elseif row.Reason == "level_too_high" then
+        return Text.GetTranslatedString("AMER_UI_Greatforge_Masterwork_LevelTooHigh", "")
+            .. tostring(row.UptierLevel)
+    end
+    return ""
+end
+
+---A property row's one-line label: name, value change, per-row cost.
+---@param row QuickForge.PickerRow
+---@param selected boolean
+---@return string
+function UI._GetRowLabel(row, selected)
+    local label = Text.GetTranslatedString("AMER_Deltamod_" .. row.Prefix, row.Prefix)
+    if row.Current ~= nil and row.Uptiered ~= nil then
+        label = ("%s  %d -> %d"):format(label, row.Current, row.Uptiered)
+    elseif row.Current ~= nil then
+        label = ("%s  %d"):format(label, row.Current)
+    end
+    if row.Cost ~= nil then
+        label = ("%s  (%d)"):format(label, row.Cost)
+    end
+
+    local color = ROW_COLOR_NORMAL
+    if not row.Eligible then
+        color = ROW_COLOR_INELIGIBLE
+    elseif selected then
+        color = ROW_COLOR_SELECTED
+    end
+    return Text.Format(label, {Color = color})
+end
+
+---Rebuilds the picker list for a fresh preview.
+---@param rows QuickForge.PickerRow[]
+function UI._BuildPickerRows(rows)
+    local list = UI.PickerList
+    list:Clear()
+    UI._RowElements = {}
+
+    for i, row in ipairs(rows) do
+        local rowBg = list:AddChild("PickerRow_" .. i, "GenericUI_Element_TiledBackground")
+        rowBg:SetBackground("Black", UI.PICKER_ROW_SIZE:unpack())
+
+        local text = TextPrefab.Create(UI, "PickerRowText_" .. i, rowBg, "", "Center", UI.PICKER_ROW_SIZE)
+
+        if Core.IsPickerRowSelectable(row) then
+            rowBg.Events.MouseUp:Subscribe(function(_)
+                UI._SelectRow(row.Key)
+            end)
+            rowBg.Events.MouseOver:Subscribe(function(_)
+                local current = UI._Current
+                if current and current.SelectedKey ~= row.Key then
+                    rowBg:SetAlpha(ROW_ALPHA_HOVER)
+                end
+            end)
+            rowBg.Events.MouseOut:Subscribe(function(_)
+                UI._RefreshRowElement(row.Key)
+            end)
+        else
+            rowBg:SetTooltip("Simple", UI._GetRowReason(row))
+        end
+
+        UI._RowElements[row.Key] = {Background = rowBg, Text = text, Row = row}
+        UI._RefreshRowElement(row.Key)
+    end
+    list:RepositionElements()
+end
+
+---Restyles one row to match the current selection state.
+---@param key string
+function UI._RefreshRowElement(key)
+    local entry = UI._RowElements[key]
+    local current = UI._Current
+    if not entry or not current then return end
+
+    local selected = current.SelectedKey == key
+    entry.Text:SetText(UI._GetRowLabel(entry.Row, selected))
+    if not entry.Row.Eligible then
+        entry.Background:SetAlpha(ROW_ALPHA_INELIGIBLE)
+    elseif selected then
+        entry.Background:SetAlpha(ROW_ALPHA_SELECTED)
+    else
+        entry.Background:SetAlpha(ROW_ALPHA_NORMAL)
+    end
+end
+
+---@param key string
+function UI._SelectRow(key)
+    local current = UI._Current
+    if not current then return end
+
+    current.SelectedKey = key
+    for rowKey in pairs(UI._RowElements) do
+        UI._RefreshRowElement(rowKey)
+    end
+    UI._RefreshCostAndConfirm()
+end
+
+---Updates the cost line and the Confirm gate from the current selection.
+---Visual gating only; the server re-validates everything at commit time.
+function UI._RefreshCostAndConfirm()
+    local current = UI._Current
+    if not current then return end
+
+    local costTSK = current.MatType == "Gold"
         and QuickForge.TranslatedStrings.ForgeWindow_CostGold
         or QuickForge.TranslatedStrings.ForgeWindow_CostSplinters
-    UI.CostText:SetText(costTSK:GetString():format(cost))
-    UI.FundsText:SetText(QuickForge.TranslatedStrings.ForgeWindow_CurrentFunds:GetString():format(funds))
 
-    -- Visual gate only; EE2's funds check re-runs at commit time.
-    UI.ConfirmButton:SetEnabled(funds >= cost)
+    if current.Rows then
+        local row = Core.FindPickerRow(current.Rows, current.SelectedKey)
+        local cost = current.FlatCost
+        if row then
+            cost = Core.GetPickerSelectionCost(row, current.FlatCost)
+        end
+        if cost ~= nil then
+            UI.CostText:SetText(costTSK:GetString():format(cost))
+        else
+            UI.CostText:SetText(QuickForge.TranslatedStrings.Picker_NoSelectionCost:GetString())
+        end
+        UI.ConfirmButton:SetEnabled(Core.CanConfirmPicker(row, current.FlatCost, current.Funds))
+    else
+        UI.CostText:SetText(costTSK:GetString():format(current.FlatCost))
+        UI.ConfirmButton:SetEnabled(current.Funds >= current.FlatCost)
+    end
+end
 
-    UI._Current = {ItemNetID = item.NetID, Option = option}
+---------------------------------------------
+-- OPEN/CLOSE/CONFIRM
+---------------------------------------------
+
+---Opens the window for a previewed operation.
+---@param item EclItem
+---@param preview QuickForge.NetMsgs.Preview
+function UI.Open(item, preview)
+    UI._Initialize()
+
+    UI._Current = {
+        ItemNetID = item.NetID,
+        Option = preview.Option,
+        Rows = preview.Rows,
+        FlatCost = preview.Cost,
+        Funds = preview.Funds,
+        MatType = preview.MatType,
+        SelectedKey = nil,
+    }
+
+    UI.Panel.HeaderText:SetText(GetOptionLabel(preview.Option))
+    UI.ItemSlot:SetItem(item)
+    UI.DescriptionText:SetText(Text.GetTranslatedString("AMER_UI_Greatforge_Desc_" .. preview.Option, ""))
+    UI.FundsText:SetText(QuickForge.TranslatedStrings.ForgeWindow_CurrentFunds:GetString():format(preview.Funds))
+
+    UI._Layout(preview.Rows ~= nil)
+    if preview.Rows then
+        UI._BuildPickerRows(preview.Rows)
+    end
+    UI._RefreshCostAndConfirm()
+
     UI:SetPositionRelativeToViewport("center", "center")
     UI:Show()
 end
@@ -130,6 +315,9 @@ end
 function UI._ConfirmPressed()
     local current = UI._Current
     if not current then return end
+    -- Picker options commit a deliberate selection; without one the button
+    -- is disabled, so this is only a race guard.
+    if current.Rows and not current.SelectedKey then return end
 
     -- Await the result; re-enabled on the next Open().
     UI.ConfirmButton:SetEnabled(false)
@@ -137,6 +325,7 @@ function UI._ConfirmPressed()
         CharacterNetID = Client.GetCharacter().NetID,
         ItemNetID = current.ItemNetID,
         Option = current.Option,
+        SelectionKey = current.SelectedKey,
     })
 end
 
@@ -168,6 +357,13 @@ local function ShowFailureDialog(outcome, itemNetID, option)
         header = QuickForge.TranslatedStrings.Label_Greatforge:GetString()
         body = QuickForge.TranslatedStrings.Error_Generic:GetString()
         offerJump = true -- EE2's own UI needs none of QuickForge's plumbing.
+    elseif outcome == "stale_selection" then
+        -- The previewed selection no longer matches the item's live rows;
+        -- no EE2 box exists for this (its UI cannot get here). The
+        -- Greatforge can resolve it: the player re-picks there.
+        header = GetOptionLabel(option)
+        body = QuickForge.TranslatedStrings.Error_StaleSelection:GetString()
+        offerJump = true
     elseif outcome == "invalid" and option == "AddSockets" then
         -- The one validity check that is QuickForge's own (ADR-0001), so no
         -- EE2 box appeared; the socket limit cannot be resolved by Jumping.
@@ -216,7 +412,7 @@ Net.RegisterListener(QuickForge.NETMSG_PREVIEW, function(payload)
     if payload.Outcome == "ok" then
         local item = payload:GetItem()
         if item then
-            UI.Open(item, payload.Option, payload.MatType, payload.Cost, payload.Funds)
+            UI.Open(item, payload)
         end
     else
         ShowFailureDialog(payload.Outcome, payload.ItemNetID, payload.Option)

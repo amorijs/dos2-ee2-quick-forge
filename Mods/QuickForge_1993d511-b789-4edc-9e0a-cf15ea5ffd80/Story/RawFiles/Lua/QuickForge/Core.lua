@@ -34,6 +34,15 @@ local Core = {}
 ---@alias QuickForge.JumpPlan "blocked_combat"|"request_instance"|"swap_ui"|"bench"
 ---@alias QuickForge.DirectOpPlan "blocked_combat"|"blocked_session"|"proceed"
 ---@alias QuickForge.CommitRoute "direct"|"jump"
+---@alias QuickForge.PickerKind "property_uptier"|"property_keep"|"donor"
+
+---One selectable row of a Forge Window picker, as previewed by the server.
+---Everything shown is read live from EE2's data; a nil Cost means EE2 gave
+---us no number for the row (never guess one).
+---@class QuickForge.PickerRow
+---@field Key string Stable identity between preview and commit (property prefix, or donor GUID).
+---@field Eligible boolean
+---@field Cost integer? Per-row cost; nil for options with a flat window cost.
 
 ---Weapons hold up to 2 runes when one-handed; everything else up to 3.
 ---@param facts QuickForge.ItemFacts
@@ -53,9 +62,10 @@ end
 ---and the Direct Operation preview re-validate server-side and show their own
 ---message box.
 ---Route: "direct" options execute in place through the Forge Window; "jump"
----options (the phase-2 picker options: Masterwork, Cull, Combine) open EE2's
----physical UI on their picker page.
----@type {ID: string, Route: QuickForge.CommitRoute, IsApplicable: fun(facts: QuickForge.ItemFacts): boolean}[]
+---options open EE2's physical UI on their picker page (phase 2 flips the
+---picker options to "direct" one at a time as they land).
+---Picker: the selection step the option's Forge Window carries, if any.
+---@type {ID: string, Route: QuickForge.CommitRoute, Picker: QuickForge.PickerKind?, IsApplicable: fun(facts: QuickForge.ItemFacts): boolean}[]
 Core.OPTIONS = {
     {
         ID = "ExtractRunes",
@@ -74,7 +84,8 @@ Core.OPTIONS = {
     },
     {
         ID = "Masterwork",
-        Route = "jump",
+        Route = "direct",
+        Picker = "property_uptier",
         IsApplicable = function(facts)
             return facts.rarity ~= "Common" and not facts.hasGreatforgeBlockedTag
         end,
@@ -137,6 +148,92 @@ function Core.GetRoute(optionID)
     for _, option in ipairs(Core.OPTIONS) do
         if option.ID == optionID then
             return option.Route
+        end
+    end
+    return nil
+end
+
+---The selection step an option's Forge Window carries, if any.
+---@param optionID string
+---@return QuickForge.PickerKind?
+function Core.GetPicker(optionID)
+    for _, option in ipairs(Core.OPTIONS) do
+        if option.ID == optionID then
+            return option.Picker
+        end
+    end
+    return nil
+end
+
+---------------------------------------------
+-- PICKERS
+---------------------------------------------
+
+---Classifies one Masterwork picker row, mirroring EE2's own selection gates
+---in order: PropertyMaxed (uptier deltamod "NONE") before
+---PropertyLevelTooHigh (uptier level above the item's), as in
+---AMER_GLO_UI_Greatforge_Internal.txt:1473-1475. The inputs come straight
+---from EE2's Masterwork_ValidatedMods row and the benched item.
+---@param facts {uptierDeltamod: string, uptierLevel: integer, itemLevel: integer}
+---@return {eligible: boolean, reason: ("maxed"|"level_too_high")?}
+function Core.ClassifyMasterworkRow(facts)
+    if facts.uptierDeltamod == "NONE" then
+        return {eligible = false, reason = "maxed"}
+    elseif facts.uptierLevel > facts.itemLevel then
+        return {eligible = false, reason = "level_too_high"}
+    end
+    return {eligible = true}
+end
+
+---Only eligible rows respond to clicks; ineligible rows stay greyed with
+---their reason. Affordability is deliberately not considered here —
+---eligible-but-unaffordable rows stay selectable with Confirm greyed.
+---@param row QuickForge.PickerRow
+---@return boolean
+function Core.IsPickerRowSelectable(row)
+    return row.Eligible
+end
+
+---The cost a selection puts on the window's cost line: the row's own cost
+---(Masterwork prices per Property) or the option's flat cost.
+---@param row QuickForge.PickerRow
+---@param flatCost integer?
+---@return integer?
+function Core.GetPickerSelectionCost(row, flatCost)
+    if row.Cost ~= nil then
+        return row.Cost
+    end
+    return flatCost
+end
+
+---Whether Confirm may be enabled for a picker selection: a deliberate pick
+---of an eligible row, with a known, affordable cost. A visual gate only —
+---the server re-validates everything at commit time.
+---@param row QuickForge.PickerRow? Nil when nothing is selected.
+---@param flatCost integer?
+---@param funds integer
+---@return boolean
+function Core.CanConfirmPicker(row, flatCost, funds)
+    if not row or not row.Eligible then
+        return false
+    end
+    local cost = Core.GetPickerSelectionCost(row, flatCost)
+    return cost ~= nil and funds >= cost
+end
+
+---Finds a previewed row again by its stable key. Used at commit time to
+---re-match the player's selection against freshly re-derived rows: a
+---selection whose key no longer matches refuses as stale.
+---@param rows QuickForge.PickerRow[]
+---@param key string?
+---@return QuickForge.PickerRow?
+function Core.FindPickerRow(rows, key)
+    if key == nil then
+        return nil
+    end
+    for _, row in ipairs(rows) do
+        if row.Key == key then
+            return row
         end
     end
     return nil

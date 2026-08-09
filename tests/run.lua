@@ -61,6 +61,7 @@ runner.Core = dofile(scriptDir
     .. "/../Mods/QuickForge_1993d511-b789-4edc-9e0a-cf15ea5ffd80/Story/RawFiles/Lua/QuickForge/Core.lua")
 
 dofile(scriptDir .. "/test_core.lua")(runner)
+dofile(scriptDir .. "/test_pickers.lua")(runner)
 
 print(("Tests: %d passed, %d failed"):format(runner.passed, runner.failed))
 for _, failure in ipairs(runner.failures) do

@@ -124,6 +124,16 @@ local QuickForge = {
             Text = "This item cannot hold any more rune sockets.",
             ContextDescription = "Dialog body when Drill Sockets is invalid (QuickForge's own check; EE2 shows no box for it)",
         },
+        Error_StaleSelection = {
+            Handle = "h2ba1c4d7g5c19g4e00g9d2fg7c8fa93d61b5",
+            Text = "That choice is no longer valid for this item. Open the Greatforge instead?",
+            ContextDescription = "Dialog body when a picker selection was invalidated between preview and commit, offering the Jump fallback",
+        },
+        Picker_NoSelectionCost = {
+            Handle = "hc7f2d09ag34b5g4c81gb6e2g0d81c5a7f244",
+            Text = "Select a property to see its cost.",
+            ContextDescription = "Forge Window cost line before a per-Property-priced picker (Masterwork) has a selection",
+        },
     },
 }
 Epip.RegisterFeature("QuickForge", "QuickForge", QuickForge)
@@ -143,25 +153,31 @@ QuickForge.Core = Ext.Require(MOD_PREFIX, "QuickForge/Core.lua")
 ---Preview/commit outcome. "ok"/"success" aside, every value is a refusal:
 ---blocked_combat/blocked_session from gating (the latter offers the Jump),
 ---invalid from EE2's own validation (EE2 has already shown its reason box),
----insufficient_funds from EE2's funds check (likewise), error for anything
----unexpected (e.g. no helper container available).
----@alias QuickForge.OperationOutcome "ok"|"success"|"blocked_combat"|"blocked_session"|"invalid"|"insufficient_funds"|"error"
+---insufficient_funds from EE2's funds check (likewise),
+---stale_selection when a picker selection no longer matches the re-derived
+---rows at commit time (QuickForge shows its own dialog, offering the Jump),
+---error for anything unexpected (e.g. no helper container available).
+---@alias QuickForge.OperationOutcome "ok"|"success"|"blocked_combat"|"blocked_session"|"invalid"|"insufficient_funds"|"stale_selection"|"error"
 
 ---Client request to preview a Direct Operation (opens the Forge Window).
 ---@class QuickForge.NetMsgs.PreviewRequest : NetLib_Message_Character, NetLib_Message_Item
 ---@field Option string Greatforge option ID.
 
 ---Server reply: live cost/validity for the Forge Window.
+---For picker options, Rows carries the picker list; Cost is the option's
+---flat cost, absent for per-row-priced pickers (Masterwork).
 ---@class QuickForge.NetMsgs.Preview : NetLib_Message_Item
 ---@field Option string
 ---@field Outcome QuickForge.OperationOutcome "ok" or a refusal.
 ---@field MatType string? "GreatforgeFrags" or "Gold" (present when Outcome == "ok").
----@field Cost integer? EE2-computed cost (present when Outcome == "ok").
+---@field Cost integer? EE2-computed flat cost (absent for per-row-priced pickers).
 ---@field Funds integer? The player's matching funds (present when Outcome == "ok").
+---@field Rows QuickForge.PickerRow[]? Picker rows (present for picker options).
 
 ---Client request to commit a previewed Direct Operation.
 ---@class QuickForge.NetMsgs.Commit : NetLib_Message_Character, NetLib_Message_Item
 ---@field Option string Greatforge option ID.
+---@field SelectionKey string? The selected picker row's Key (required for picker options).
 
 ---Server reply: what the commit did.
 ---@class QuickForge.NetMsgs.CommitResult : NetLib_Message_Item

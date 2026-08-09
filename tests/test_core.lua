@@ -124,7 +124,7 @@ return function(t)
     end)
 
     ----------------------------------------
-    -- Commit routes (phase 1: pickers stay Jumps)
+    -- Commit routes (phase 2 flips picker options to direct one at a time)
     ----------------------------------------
 
     t.test("the seven non-picker options route direct", function()
@@ -134,8 +134,12 @@ return function(t)
         end
     end)
 
-    t.test("the three picker options route jump", function()
-        for _, id in ipairs({"Masterwork", "RemoveMods", "Combine"}) do
+    t.test("Masterwork routes direct (ticket 01)", function()
+        t.assertEquals(Core.GetRoute("Masterwork"), "direct", "Masterwork")
+    end)
+
+    t.test("the remaining picker options route jump until their tickets land", function()
+        for _, id in ipairs({"RemoveMods", "Combine"}) do
             t.assertEquals(Core.GetRoute(id), "jump", id)
         end
     end)
