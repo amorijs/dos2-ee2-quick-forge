@@ -108,6 +108,35 @@ ContextMenu.RegisterVanillaMenuHandler("Item", function(item)
     })
 end)
 
+---Aligns the submenu's bottom edge with the parent menu's, so that hovering
+---the "Greatforge..." entry — which sits at the bottom of the item menu —
+---opens the list beside the cursor instead of up at the menu's top corner,
+---where reaching it means travelling diagonally across other entries.
+---Epip lays every menu out at y = 0 (ContextMenu.SetPosition), and
+---AddSubMenu re-applies that as its last step, so this has to run after it.
+---Bottom-alignment specifically keeps the menu area's overall bottom edge
+---exactly where SetPosition computed it, leaving its off-screen correction
+---valid; a submenu taller than the parent menu is left alone.
+---Reaching into the Flash display objects mirrors what Epip's own
+---positioning does, and is guarded so a layout change costs only the nicety.
+local function AlignSubmenuToParentBottom()
+    local aligned, err = pcall(function()
+        local ui = ContextMenu.GetActiveUI()
+        local root = ui:GetRoot()
+        local mainMenu = root.contextMenusList.content_array[0]
+        local subMenu = ContextMenu.GetSubMenus(ui)[SUBMENU_ID]
+        if not mainMenu or not subMenu then return end
+
+        local offset = mainMenu.height - subMenu.height
+        if offset > 0 then
+            subMenu.y = offset
+        end
+    end)
+    if not aligned then
+        QuickForge:__LogWarning("Could not align the Greatforge submenu: " .. tostring(err))
+    end
+end
+
 ContextMenu.RegisterMenuHandler(SUBMENU_ID, function(item)
     if not item or not Entity.IsItem(item) then return end
 
@@ -132,6 +161,7 @@ ContextMenu.RegisterMenuHandler(SUBMENU_ID, function(item)
             entries = entries,
         },
     })
+    AlignSubmenuToParentBottom()
 end)
 
 -- Picker options and the "Open in Greatforge..." fallback (params.Option nil).
