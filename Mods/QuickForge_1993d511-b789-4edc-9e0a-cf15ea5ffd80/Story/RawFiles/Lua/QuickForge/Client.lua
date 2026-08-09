@@ -1,7 +1,9 @@
 ---------------------------------------------
 -- QuickForge client: "Greatforge" submenu in the item context menu.
--- Keyboard & mouse only by construction: Epip's context menu system
--- does not initialize on controller UIs.
+-- Direct options open the Forge Window (via a server preview round-trip);
+-- picker options and the "Open in Greatforge..." fallback Jump into EE2's
+-- physical UI. Keyboard & mouse only by construction: Epip's context menu
+-- system does not initialize on controller UIs.
 ---------------------------------------------
 
 local QuickForge = Epip.GetFeature("QuickForge", "QuickForge", true) ---@type Features.QuickForge
@@ -11,6 +13,7 @@ local ContextMenu = Client.UI.ContextMenu
 local ROOT_ENTRY_ID = "QuickForge_Root"
 local SUBMENU_ID = "QuickForge_Menu"
 local JUMP_EVENT_ID = "QuickForge_Jump"
+local DIRECT_EVENT_ID = "QuickForge_Direct"
 
 ---Gathers the pure-logic facts Core.GetApplicableOptions() needs.
 ---@param item EclItem
@@ -76,10 +79,13 @@ function QuickForge._ShouldShowSubmenu(item)
     return true
 end
 
----Player-facing labels for all options, keyed by option ID.
+---Player-facing labels for all options (plus the fallback entry),
+---keyed by option ID.
 ---@return table<string, string>
 function QuickForge._GetOptionLabels()
-    local labels = {}
+    local labels = {
+        OpenGreatforge = QuickForge.TranslatedStrings.Label_OpenGreatforge:GetString(),
+    }
     for _, option in ipairs(Core.OPTIONS) do
         local tsk = QuickForge.TranslatedStrings["Label_" .. option.ID]
         if tsk then
@@ -110,11 +116,12 @@ ContextMenu.RegisterMenuHandler(SUBMENU_ID, function(item)
 
     local entries = {}
     for _, menuEntry in ipairs(menuEntries) do
+        local isDirect = menuEntry.Option ~= nil and Core.GetRoute(menuEntry.Option) == "direct"
         table.insert(entries, {
             id = menuEntry.ID,
             type = "button",
             text = menuEntry.Label,
-            eventIDOverride = JUMP_EVENT_ID,
+            eventIDOverride = isDirect and DIRECT_EVENT_ID or JUMP_EVENT_ID,
             params = {Option = menuEntry.Option},
         })
     end
@@ -127,10 +134,23 @@ ContextMenu.RegisterMenuHandler(SUBMENU_ID, function(item)
     })
 end)
 
+-- Picker options and the "Open in Greatforge..." fallback (params.Option nil).
 ContextMenu.RegisterElementListener(JUMP_EVENT_ID, "buttonPressed", function(item, params)
     if not item or not Entity.IsItem(item) then return end
 
     Net.PostToServer(QuickForge.NETMSG_JUMP, {
+        CharacterNetID = Client.GetCharacter().NetID,
+        ItemNetID = item.NetID,
+        Option = params.Option,
+    })
+end)
+
+-- Direct options: request a live cost/validity preview; the server's reply
+-- opens the Forge Window (see ForgeWindow.lua).
+ContextMenu.RegisterElementListener(DIRECT_EVENT_ID, "buttonPressed", function(item, params)
+    if not item or not Entity.IsItem(item) then return end
+
+    Net.PostToServer(QuickForge.NETMSG_PREVIEW_REQUEST, {
         CharacterNetID = Client.GetCharacter().NetID,
         ItemNetID = item.NetID,
         Option = params.Option,

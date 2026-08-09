@@ -25,7 +25,7 @@ local NULL_GUID = "NULL_00000000-0000-0000-0000-000000000000"
 
 ---@class QuickForge.PendingJump
 ---@field ItemGuid string
----@field Option string
+---@field Option string? Nil for the "Open in Greatforge..." fallback: bench only, land on the option wheel.
 
 ---Pending Jumps by character GUID — per-character, so simultaneous Jumps by
 ---different players cannot interfere. In-memory only: a pending Jump does not
@@ -101,7 +101,10 @@ end
 Net.RegisterListener(QuickForge.NETMSG_JUMP, function(payload)
     local char, item = payload:GetCharacter(), payload:GetItem()
     local option = payload.Option
-    if not char or not item or type(option) ~= "string" or not Core.IsKnownOption(option) then
+    if not char or not item then
+        return
+    end
+    if option ~= nil and (type(option) ~= "string" or not Core.IsKnownOption(option)) then
         return
     end
 
@@ -138,6 +141,10 @@ Ext.Osiris.RegisterListener("PROC_AMER_UI_Greatforge_FinalizeBenchedItem", 9, "a
         QuickForge._PendingJumps[charKey] = nil
         if GetBareGuid(itemGuid) ~= GetBareGuid(pending.ItemGuid) then
             -- Something else got benched in the meantime; leave the UI as-is.
+            return
+        end
+        if not pending.Option then
+            -- "Open in Greatforge...": benched is all; stay on the option wheel.
             return
         end
 

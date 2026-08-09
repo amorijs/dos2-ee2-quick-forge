@@ -15,3 +15,4 @@ Mods.EpipEncounters.Epip.ImportGlobals(Mods.QuickForge)
 
 Ext.Require(MOD_PREFIX, "QuickForge/Shared.lua")
 Ext.Require(MOD_PREFIX, "QuickForge/Client.lua")
+Ext.Require(MOD_PREFIX, "QuickForge/ForgeWindow.lua")

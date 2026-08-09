@@ -124,26 +124,87 @@ return function(t)
     end)
 
     ----------------------------------------
+    -- Commit routes (phase 1: pickers stay Jumps)
+    ----------------------------------------
+
+    t.test("the seven non-picker options route direct", function()
+        for _, id in ipairs({"ExtractRunes", "Reduce", "LevelUp", "Focalize",
+                             "Transmute", "AddSockets", "PIP_Engrave"}) do
+            t.assertEquals(Core.GetRoute(id), "direct", id)
+        end
+    end)
+
+    t.test("the three picker options route jump", function()
+        for _, id in ipairs({"Masterwork", "RemoveMods", "Combine"}) do
+            t.assertEquals(Core.GetRoute(id), "jump", id)
+        end
+    end)
+
+    t.test("GetRoute returns nil for unknown options", function()
+        t.assertEquals(Core.GetRoute("DoCraft"), nil, "unknown option")
+    end)
+
+    ----------------------------------------
     -- BuildMenuEntries
     ----------------------------------------
 
     t.test("BuildMenuEntries maps option IDs to entry descriptors with labels", function()
-        local entries = Core.BuildMenuEntries({"Reduce", "PIP_Engrave"}, {
+        local entries = Core.BuildMenuEntries({"Reduce", "Masterwork"}, {
             Reduce = "Dismantle",
-            PIP_Engrave = "Engrave",
+            Masterwork = "Masterwork",
         })
-        t.assertEquals(#entries, 2, "entry count")
         t.assertEquals(entries[1].ID, "QuickForge_Option_Reduce", "entry 1 ID")
         t.assertEquals(entries[1].Option, "Reduce", "entry 1 option")
         t.assertEquals(entries[1].Label, "Dismantle", "entry 1 label")
-        t.assertEquals(entries[2].ID, "QuickForge_Option_PIP_Engrave", "entry 2 ID")
-        t.assertEquals(entries[2].Option, "PIP_Engrave", "entry 2 option")
-        t.assertEquals(entries[2].Label, "Engrave", "entry 2 label")
+        t.assertEquals(entries[2].ID, "QuickForge_Option_Masterwork", "entry 2 ID")
+        t.assertEquals(entries[2].Option, "Masterwork", "entry 2 option")
+    end)
+
+    t.test("BuildMenuEntries appends the Open in Greatforge fallback entry last", function()
+        local entries = Core.BuildMenuEntries({"Reduce"}, {
+            Reduce = "Dismantle",
+            OpenGreatforge = "Open in Greatforge...",
+        })
+        t.assertEquals(#entries, 2, "entry count")
+        local fallback = entries[#entries]
+        t.assertEquals(fallback.ID, "QuickForge_OpenGreatforge", "fallback ID")
+        t.assertEquals(fallback.Option, nil, "fallback has no option")
+        t.assertEquals(fallback.Label, "Open in Greatforge...", "fallback label")
+    end)
+
+    t.test("BuildMenuEntries appends the fallback even with no applicable options", function()
+        local entries = Core.BuildMenuEntries({}, {})
+        t.assertEquals(#entries, 1, "entry count")
+        t.assertEquals(entries[1].ID, "QuickForge_OpenGreatforge", "fallback ID")
     end)
 
     t.test("BuildMenuEntries falls back to the option ID when no label is provided", function()
         local entries = Core.BuildMenuEntries({"Focalize"}, {})
         t.assertEquals(entries[1].Label, "Focalize", "fallback label")
+    end)
+
+    ----------------------------------------
+    -- PlanDirectOperation
+    ----------------------------------------
+
+    t.test("PlanDirectOperation blocks while the party is in combat", function()
+        t.assertEquals(Core.PlanDirectOperation({partyInCombat = true, anyPlayerInGreatforge = false}),
+            "blocked_combat", "plan")
+    end)
+
+    t.test("PlanDirectOperation refuses while any player is in a Greatforge session", function()
+        t.assertEquals(Core.PlanDirectOperation({partyInCombat = false, anyPlayerInGreatforge = true}),
+            "blocked_session", "plan")
+    end)
+
+    t.test("PlanDirectOperation reports combat over session when both apply", function()
+        t.assertEquals(Core.PlanDirectOperation({partyInCombat = true, anyPlayerInGreatforge = true}),
+            "blocked_combat", "plan")
+    end)
+
+    t.test("PlanDirectOperation proceeds otherwise", function()
+        t.assertEquals(Core.PlanDirectOperation({partyInCombat = false, anyPlayerInGreatforge = false}),
+            "proceed", "plan")
     end)
 
     ----------------------------------------

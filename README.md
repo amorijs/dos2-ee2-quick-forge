@@ -4,10 +4,18 @@ Adds Greatforge access to the equipment right-click context menu, for
 Divinity: Original Sin 2 (DE) + Epic Encounters 2 + Epip Encounters.
 
 A right-click on any equipment shows a **Greatforge** submenu listing the
-applicable Greatforge options. Choosing one *Jumps*: the Greatforge opens with
-the item already benched and that option's confirm (or picker) page open. The
-Jump commits nothing — costs, confirmations and rules are unchanged; confirm
-or back out inside the Greatforge as normal.
+applicable Greatforge options. The seven non-picker options (Empower,
+Focalize, Extract Runes, Drill Sockets, Transmute, Dismantle, Engrave)
+execute **in place**: a small confirm window (the *Forge Window*) shows the
+item, EE2's own option description, and the live EE2-computed cost next to
+your funds — confirm and the operation commits through EE2's own request
+pipeline, with no Ascension visit. The picker options (Masterwork, Cull
+Properties, Combine) and the "Open in Greatforge..." fallback entry *Jump*
+instead: the Greatforge opens with the item already benched.
+
+QuickForge never reimplements Greatforge rules: validation, costs, payment,
+and effects are EE2's own, invoked programmatically (see
+`docs/adr/0001-quickforge-ui-replaces-greatforge-confirm.md`).
 
 See `CONTEXT.md` for the glossary and settled design decisions.
 
@@ -15,10 +23,15 @@ See `CONTEXT.md` for the glossary and settled design decisions.
 
 - `Mods/QuickForge_<UUID>/` — the mod, laid out as a pak root.
   - `Story/RawFiles/Lua/QuickForge/Core.lua` — pure logic (option registry,
-    applicability rules, menu building, jump planning). No game API access;
-    runs under plain Lua for tests.
+    applicability rules, commit routing, menu building, gating plans). No
+    game API access; runs under plain Lua for tests.
   - `Story/RawFiles/Lua/QuickForge/{Shared,Client,Server}.lua` — Epip feature
     registration, context-menu integration, and the server-side Jump sequence.
+  - `Story/RawFiles/Lua/QuickForge/DirectOps.lua` — server-side Direct
+    Operations: preview and commit through EE2's request pipeline.
+  - `Story/RawFiles/Lua/QuickForge/ForgeWindow.lua` — the client confirm
+    window (Epip Generic UI).
+- `docs/` — ADRs and research notes.
 - `tests/` — test suite for the pure core.
 - `references/` (untracked) — unpacked EE2 + Epip sources used for research.
 
