@@ -49,9 +49,12 @@ UI.PICKER_ROW_SIZE_DONOR = V(320, 56)
 UI.DESC_Y = 150
 UI.PICKER_Y = 310
 UI.BOTTOM_BLOCK_HEIGHT = 150 -- Cost line, funds line, buttons, frame border.
+UI.OUTPUT_TEXT_HEIGHT = 28
+UI.OUTPUT_SLOT_ROW_HEIGHT = 60
+UI.OUTPUT_SLOT_WIDTH = 56
 UI._Initialized = false
 ---The previewed operation awaiting confirmation, if the window is open.
----@type {ItemNetID: NetId, Option: string, PickerKind: QuickForge.PickerKind?, Rows: QuickForge.PickerRow[]?, InvalidDonors: table<string, string>?, FlatCost: integer?, Funds: integer, MatType: string?, SelectedKey: string?}?
+---@type {ItemNetID: NetId, Option: string, PickerKind: QuickForge.PickerKind?, Rows: QuickForge.PickerRow[]?, Outputs: QuickForge.OutputItem[]?, InvalidDonors: table<string, string>?, FlatCost: integer?, Funds: integer, MatType: string?, SelectedKey: string?}?
 UI._Current = nil
 ---Per-row UI pieces of the open picker, by row key.
 ---@type table<string, {Background: GenericUI_Element_TiledBackground, Text: GenericUI_Prefab_Text, Row: QuickForge.PickerRow}>
@@ -119,6 +122,15 @@ function UI._Initialize()
     picker:SetPosition((UI.PANEL_SIZE[1] - UI.PICKER_ROW_SIZE[1]) / 2, UI.PICKER_Y)
     UI.PickerList = picker
 
+    -- What the operation hands back, previewed above the cost line: a line
+    -- naming the change, and hoverable slots for the items EE2's data names
+    -- exactly.
+    local outputText = TextPrefab.Create(UI, "OutputLine", bg, "", "Center", UI.LINE_SIZE)
+    UI.OutputText = outputText
+
+    local outputList = bg:AddChild("OutputList", "GenericUI_Element_HorizontalList")
+    UI.OutputList = outputList
+
     local cost = TextPrefab.Create(UI, "CostLine", bg, "", "Center", UI.LINE_SIZE)
     UI.CostText = cost
 
@@ -156,8 +168,16 @@ end
 ---frame. The Donor picker also shifts the target item aside to make room
 ---for the Donor slot next to it.
 ---@param pickerKind QuickForge.PickerKind?
-function UI._Layout(pickerKind)
-    local size = pickerKind ~= nil and UI.PANEL_SIZE_PICKER or UI.PANEL_SIZE
+---@param outputSlotCount integer Previewed output items, 0 for none.
+---@param hasOutputText boolean
+function UI._Layout(pickerKind, outputSlotCount, hasOutputText)
+    -- The output block grows the panel rather than squeezing the rest.
+    local outputHeight = 0
+    if hasOutputText then outputHeight = outputHeight + UI.OUTPUT_TEXT_HEIGHT end
+    if outputSlotCount > 0 then outputHeight = outputHeight + UI.OUTPUT_SLOT_ROW_HEIGHT end
+
+    local base = pickerKind ~= nil and UI.PANEL_SIZE_PICKER or UI.PANEL_SIZE
+    local size = V(base[1], base[2] + outputHeight)
     UI.Panel.Background:SetBackground("FormattedTooltip", size:unpack())
     UI:SetPanelSize(size)
     UI.PickerList:SetVisible(pickerKind ~= nil)
@@ -172,14 +192,105 @@ function UI._Layout(pickerKind)
     end
 
     local lineX = (size[1] - UI.LINE_SIZE[1]) / 2
-    local bottomTop = size[2] - UI.BOTTOM_BLOCK_HEIGHT
-    UI.CostText:SetPosition(lineX, bottomTop)
-    UI.FundsText:SetPosition(lineX, bottomTop + 30)
+    local y = size[2] - (UI.BOTTOM_BLOCK_HEIGHT + outputHeight)
+
+    UI.OutputText:GetMainElement():SetVisible(hasOutputText)
+    if hasOutputText then
+        UI.OutputText:SetPosition(lineX, y)
+        y = y + UI.OUTPUT_TEXT_HEIGHT
+    end
+
+    UI.OutputList:SetVisible(outputSlotCount > 0)
+    if outputSlotCount > 0 then
+        UI.OutputList:SetPosition((size[1] - outputSlotCount * UI.OUTPUT_SLOT_WIDTH) / 2, y)
+        y = y + UI.OUTPUT_SLOT_ROW_HEIGHT
+    end
+
+    UI.CostText:SetPosition(lineX, y)
+    UI.FundsText:SetPosition(lineX, y + 30)
     local buttonsWidth = UI.ButtonList:GetWidth()
     if not buttonsWidth or buttonsWidth <= 0 then
         buttonsWidth = 270 -- Fallback near the two buttons' texture widths.
     end
-    UI.ButtonList:SetPosition((size[1] - buttonsWidth) / 2, bottomTop + 65)
+    UI.ButtonList:SetPosition((size[1] - buttonsWidth) / 2, y + 65)
+end
+
+---------------------------------------------
+-- OUTPUT PREVIEW
+---------------------------------------------
+
+---Renders the previewed output items as hoverable slots. Each slot is left
+---"empty" as far as the prefab is concerned — its own tooltip logic needs
+---an item the player already owns, which is exactly what these are not —
+---so the icon and hover name come from the template EE2 named.
+---@param outputs QuickForge.OutputItem[]?
+function UI._BuildOutputSlots(outputs)
+    local list = UI.OutputList
+    list:Clear() -- Destroys the previous preview's slot elements.
+    if not outputs then return end
+
+    for i, output in ipairs(outputs) do
+        local template = Ext.Template.GetTemplate(output.TemplateID) ---@type ItemTemplate?
+        local slot = HotbarSlotPrefab.Create(UI, "OutputSlot_" .. i, list)
+        slot:SetUpdateDelay(-1)
+        slot:SetUsable(false)
+
+        if template then
+            slot:SetIcon(template.Icon)
+            slot.SlotElement:SetTooltip("Simple",
+                Text.GetTranslatedString(template.DisplayName, template.Name or ""))
+        end
+        if output.Amount and output.Amount > 1 then
+            slot:SetLabel(Text.Format(tostring(output.Amount), {Size = 19}))
+        end
+    end
+    list:RepositionElements()
+end
+
+---The line naming what the operation does to the item, for options whose
+---result is a property change rather than a new item. Picker options only
+---know it once a row is chosen.
+---@return string?
+function UI._GetOutputText()
+    local current = UI._Current
+    if not current then return nil end
+
+    if current.Option == "AddSockets" then
+        return QuickForge.TranslatedStrings.Output_AddSockets:GetString()
+    end
+
+    local row = current.Rows and Core.FindPickerRow(current.Rows, current.SelectedKey) or nil
+    if not row then
+        if current.PickerKind then
+            return "" -- Reserve the line until a pick.
+        end
+        -- Options whose output is previewed as items get the label instead.
+        return current.Outputs and QuickForge.TranslatedStrings.Output_Yields:GetString() or nil
+    end
+
+    local property = Text.GetTranslatedString("AMER_Deltamod_" .. row.Prefix, row.Prefix)
+    if current.Option == "Masterwork" then
+        if row.Current ~= nil and row.Uptiered ~= nil then
+            property = ("%s %d -> %d"):format(property, row.Current, row.Uptiered)
+        end
+        return QuickForge.TranslatedStrings.Output_UpgradesProperty:GetString():format(property)
+    elseif current.Option == "RemoveMods" then
+        if row.Current ~= nil then
+            property = ("%s %d"):format(property, row.Current)
+        end
+        return QuickForge.TranslatedStrings.Output_KeepsProperty:GetString():format(property)
+    elseif current.Option == "Combine" then
+        return QuickForge.TranslatedStrings.Output_AddsProperty:GetString():format(property)
+    end
+    return nil
+end
+
+---Refreshes the output line from the current selection.
+function UI._RefreshOutputText()
+    local text = UI._GetOutputText()
+    if text then
+        UI.OutputText:SetText(text)
+    end
 end
 
 ---------------------------------------------
@@ -340,6 +451,7 @@ function UI._SelectRow(key)
         -- List and slot never disagree about the current Donor.
         UI._SyncDonorSlot()
     end
+    UI._RefreshOutputText()
     UI._RefreshCostAndConfirm()
 end
 
@@ -453,6 +565,7 @@ function UI.Open(item, preview)
         Option = preview.Option,
         PickerKind = pickerKind,
         Rows = pickerKind ~= nil and (preview.Rows or {}) or nil,
+        Outputs = preview.Outputs,
         InvalidDonors = preview.InvalidDonors,
         FlatCost = preview.Cost,
         Funds = preview.Funds,
@@ -479,7 +592,11 @@ function UI.Open(item, preview)
 
     UI.FundsText:SetText(QuickForge.TranslatedStrings.ForgeWindow_CurrentFunds:GetString():format(preview.Funds))
 
-    UI._Layout(pickerKind)
+    local outputs = preview.Outputs
+    UI._Layout(pickerKind, outputs and #outputs or 0, UI._GetOutputText() ~= nil)
+    UI._BuildOutputSlots(outputs)
+    UI._RefreshOutputText()
+
     if UI._Current.Rows then
         UI._BuildPickerRows(UI._Current.Rows, pickerKind)
     end

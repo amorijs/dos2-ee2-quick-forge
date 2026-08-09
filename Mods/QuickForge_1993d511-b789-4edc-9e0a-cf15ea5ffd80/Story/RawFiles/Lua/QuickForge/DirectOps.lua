@@ -353,6 +353,74 @@ function QuickForge._BuildKeepRows()
 end
 
 ---------------------------------------------
+-- OUTPUT PREVIEW
+---------------------------------------------
+
+---Dismantle's Splinter yield, straight from EE2's own query — the same
+---number its option wheel displays.
+---@param item EsvItem
+---@param specs QuickForge.ItemSpecs
+---@return integer?
+function QuickForge._GetReduceFragments(item, specs)
+    local rarityRows = Osi.DB_AMER_GEN_ItemRarity:Get(nil, specs.ItemType)
+    local rarityInt = rarityRows and rarityRows[1] and rarityRows[1][1]
+    if not rarityInt then return nil end
+
+    if not Osi.QRY_AMER_UI_Greatforge_Reduce_GetFragmentsAwarded(
+        item.MyGuid, specs.Level, rarityInt, specs.Slot, specs.SubType, specs.Handedness) then
+        return nil
+    end
+    return GetOutputValue(Osi.DB_AMER_GEN_OUTPUT_Integer)
+end
+
+---The Splinter root template, read live from EE2's own cost list (every
+---GreatforgeFrags-priced option names it as its material root) rather than
+---hardcoded from EE2's Reduce script.
+---@return string?
+function QuickForge._GetSplinterTemplate()
+    local rows = Osi.DB_AMER_UI_Greatforge_Option_Cost:Get(nil, "GreatforgeFrags", nil, nil)
+    return rows and rows[1] and rows[1][3]
+end
+
+---The items an operation will hand over, for options whose output EE2's
+---data names exactly. Everything else previews no items: Transmute rerolls
+---randomly, Dismantle's ingredients come from chance-rolled treasure
+---tables, Cull regenerates implicits and sockets, and the options that
+---modify the benched item in place hand back no new item at all.
+---@param item EsvItem
+---@param option string
+---@param fragments integer? Dismantle's Splinter count, already computed.
+---@return QuickForge.OutputItem[]?
+function QuickForge._BuildOutputItems(item, option, fragments)
+    if option == "ExtractRunes" then
+        -- Exactly the runes currently socketed: EE2's DoCraft recovers them
+        -- all (PROC_AMER_GEN_ItemRemoveRunes over every index).
+        local outputs = {}
+        for index = 0, 2 do
+            local rune = Item.GetRune(item, index)
+            local template = rune and rune.RootTemplate
+            if template and template ~= "" then
+                table.insert(outputs, {TemplateID = template})
+            end
+        end
+        return outputs[1] and outputs or nil
+    elseif option == "Focalize" then
+        -- The one rune EE2's DoCraft grants for this Artifact
+        -- (AMER_GLO_UI_Greatforge_Internal.txt:1583-1592).
+        if not Osi.QRY_AMER_Aritfacts_GetItemArtifactID(item.MyGuid) then return nil end
+        local artifactID = GetOutputValue(Osi.DB_AMER_GEN_OUTPUT_String)
+        if not artifactID then return nil end
+        local rows = Osi.DB_AMER_Artifacts:Get(nil, nil, nil, artifactID)
+        local rune = rows and rows[1] and rows[1][2]
+        return rune and {{TemplateID = rune}} or nil
+    elseif option == "Reduce" and fragments and fragments > 0 then
+        local splinter = QuickForge._GetSplinterTemplate()
+        return splinter and {{TemplateID = splinter, Amount = fragments}} or nil
+    end
+    return nil
+end
+
+---------------------------------------------
 -- COMBINE DONORS
 ---------------------------------------------
 
@@ -713,16 +781,11 @@ function QuickForge._BuildPreview(char, item, option, specs)
     -- renders the number as a separate element. Compute it through EE2's
     -- own query (internal-goal-scoped — active right now) and let the
     -- client append it to the description.
-    local descriptionSuffix = nil
+    local descriptionSuffix, fragments = nil, nil
     if option == "Reduce" then
-        local rarityRows = Osi.DB_AMER_GEN_ItemRarity:Get(nil, specs.ItemType)
-        local rarityInt = rarityRows and rarityRows[1] and rarityRows[1][1]
-        if rarityInt and Osi.QRY_AMER_UI_Greatforge_Reduce_GetFragmentsAwarded(
-            item.MyGuid, specs.Level, rarityInt, specs.Slot, specs.SubType, specs.Handedness) then
-            local frags = GetOutputValue(Osi.DB_AMER_GEN_OUTPUT_Integer)
-            if frags then
-                descriptionSuffix = " " .. tostring(frags)
-            end
+        fragments = QuickForge._GetReduceFragments(item, specs)
+        if fragments then
+            descriptionSuffix = " " .. tostring(fragments)
         end
     end
 
@@ -733,6 +796,7 @@ function QuickForge._BuildPreview(char, item, option, specs)
         Rows = rows,
         InvalidDonors = invalidDonors,
         DescriptionSuffix = descriptionSuffix,
+        Outputs = QuickForge._BuildOutputItems(item, option, fragments),
     }
 end
 

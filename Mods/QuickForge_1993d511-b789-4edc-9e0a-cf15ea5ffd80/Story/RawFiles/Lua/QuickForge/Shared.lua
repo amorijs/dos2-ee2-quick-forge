@@ -139,6 +139,31 @@ local QuickForge = {
             Text = "No item in the party can be combined into this one.",
             ContextDescription = "Forge Window empty state for a donorless Combine picker",
         },
+        Output_Yields = {
+            Handle = "hb4c1e70fg9d38g4a26g8f14g3e0721cba95d",
+            Text = "Yields:",
+            ContextDescription = "Forge Window label above the previewed output items",
+        },
+        Output_AddSockets = {
+            Handle = "h6f8a2d13gc504g4e71gb9a8g27de5104f83c",
+            Text = "Adds one rune socket.",
+            ContextDescription = "Forge Window output line for Drill Sockets",
+        },
+        Output_UpgradesProperty = {
+            Handle = "h29e7b346g0af1g4c88ga75dg8b41ce20d967",
+            Text = "Upgrades: %s",
+            ContextDescription = "Forge Window output line for Masterwork; %s is the property and its value change",
+        },
+        Output_KeepsProperty = {
+            Handle = "hd15c9e82g4b73g40feg9c26ga7e83f14b60d",
+            Text = "Keeps: %s",
+            ContextDescription = "Forge Window output line for Cull Properties; %s is the kept property",
+        },
+        Output_AddsProperty = {
+            Handle = "h7a30f5c9ge618g4d2bgb84fg1c05d97ea236",
+            Text = "Adds: %s",
+            ContextDescription = "Forge Window output line for Combine; %s is the transferred property",
+        },
         DropSlot_Hint = {
             Handle = "h5e02c8b1gf6d4g49a7gb305g6a1db2c94e78",
             Text = "Drag an item here to consume it, or pick one from the list.",
@@ -321,6 +346,15 @@ end
 ---@field Rows QuickForge.PickerRow[]? Picker rows (present for picker options).
 ---@field InvalidDonors table<string, string>? Refused Combine candidates: NetID string -> reason (EE2 message TSK suffix, or "QuickForge_Equipped").
 ---@field DescriptionSuffix string? EE2-computed text appended to the option description (Dismantle's Splinters-granted number).
+---@field Outputs QuickForge.OutputItem[]? Items the operation will hand over, where EE2's data names them exactly.
+
+---One previewed output item, shown as a hoverable slot in the Forge Window.
+---Only outputs EE2 names exactly appear; its random elements (Transmute's
+---reroll, Dismantle's ingredient tables, Cull's regenerated implicits) are
+---never guessed at.
+---@class QuickForge.OutputItem
+---@field TemplateID string Root template of the item granted.
+---@field Amount integer? Stack size, when more than one.
 
 ---Client request to commit a previewed Direct Operation.
 ---@class QuickForge.NetMsgs.Commit : NetLib_Message_Character, NetLib_Message_Item
