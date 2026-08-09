@@ -432,7 +432,11 @@ function QuickForge._BuildDonorRows(char, item, specs)
         return candidate.Stats ~= nil and Item.IsEquipment(candidate)
     end, true)
     for _, candidate in ipairs(candidates) do
-        if Osi.IsEquipped(candidate.MyGuid) == true then
+        -- Item.IsEquipped inspects the parent inventory's equipment slots
+        -- (there is no Osiris query for this); pcall guards items whose
+        -- parent inventory cannot be resolved — those are not equipped.
+        local equippedKnown, equipped = pcall(Item.IsEquipped, candidate)
+        if equippedKnown and equipped then
             invalid[tostring(candidate.NetID)] = "QuickForge_Equipped"
         else
             local verdict, donorPrefix, donorDeltamod =
@@ -681,12 +685,31 @@ function QuickForge._BuildPreview(char, item, option, specs)
         -- an explicit empty state, not a refusal dialog.
         rows, _, invalidDonors = QuickForge._BuildDonorRows(char, item, specs)
     end
+
+    -- Dismantle's description ends with "Splinters granted:"; EE2's wheel
+    -- renders the number as a separate element. Compute it through EE2's
+    -- own query (internal-goal-scoped — active right now) and let the
+    -- client append it to the description.
+    local descriptionSuffix = nil
+    if option == "Reduce" then
+        local rarityRows = Osi.DB_AMER_GEN_ItemRarity:Get(nil, specs.ItemType)
+        local rarityInt = rarityRows and rarityRows[1] and rarityRows[1][1]
+        if rarityInt and Osi.QRY_AMER_UI_Greatforge_Reduce_GetFragmentsAwarded(
+            item.MyGuid, specs.Level, rarityInt, specs.Slot, specs.SubType, specs.Handedness) then
+            local frags = GetOutputValue(Osi.DB_AMER_GEN_OUTPUT_Integer)
+            if frags then
+                descriptionSuffix = " " .. tostring(frags)
+            end
+        end
+    end
+
     return "ok", {
         MatType = cost.MatType,
         Cost = cost.Amount,
         Funds = QuickForge._GetFunds(char, cost),
         Rows = rows,
         InvalidDonors = invalidDonors,
+        DescriptionSuffix = descriptionSuffix,
     }
 end
 
@@ -781,7 +804,8 @@ function QuickForge._PrepareCommit(char, item, option, specs, selectionKey)
         if not resolved or not donor then return "stale_selection" end
         local inParty = Osi.ItemIsInPartyInventory(donor.MyGuid, char.MyGuid, 0)
         if inParty ~= 1 and inParty ~= true then return "stale_selection" end
-        if Osi.IsEquipped(donor.MyGuid) == true then return "stale_selection" end
+        local equippedKnown, equipped = pcall(Item.IsEquipped, donor)
+        if not equippedKnown or equipped then return "stale_selection" end
         local verdict, _, donorDeltamod = QuickForge._EvaluateDonorCandidate(item, specs, context, donor)
         if not verdict.valid or not donorDeltamod then return "stale_selection" end
 

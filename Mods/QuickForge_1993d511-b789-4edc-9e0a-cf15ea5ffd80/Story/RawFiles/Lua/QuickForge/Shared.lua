@@ -160,6 +160,25 @@ Epip.RegisterFeature("QuickForge", "QuickForge", QuickForge)
 
 QuickForge.Core = Ext.Require(MOD_PREFIX, "QuickForge/Core.lua")
 
+---EE2's option-description string handles, from its own
+---`Localization/AMER_UI_Greatforge.lsb` (keys "AMER_UI_Greatforge_Desc_*").
+---EE2 defines the keys only in that key bank, which the Script Extender's
+---key lookup does not resolve, so the Forge Window references the handles;
+---the text itself still comes from the game's localization at runtime.
+---Epip's own options (AddSockets, PIP_Engrave) register their keys at
+---runtime and resolve by key, so they are absent here.
+---@type table<string, TranslatedStringHandle>
+QuickForge.EE2_DESC_HANDLES = {
+    Reduce = "h8a8b6c8bgd119g49e6gba99g4bb18ba073fd",
+    LevelUp = "hc7c66553g79f8g4079g9a65gb73e8cbd8452",
+    ExtractRunes = "h330f2b00gcf60g46e7gaa4dgb5c0b715520f",
+    Transmute = "hebc3cf53g9421g4ec1ga783ga4389b0f57f7",
+    Masterwork = "he1b10f66g87f7g4522ga363g21e00f87e25a",
+    Focalize = "h0f37796ag94b5g4174gbca4g2bc90c94ad9c",
+    RemoveMods = "h0d0d4435g1428g45cag9494g90ad9fb1cf10",
+    Combine = "h8eddba67g5ff9g4ba5g84dag165775111b92",
+}
+
 ---------------------------------------------
 -- NET MESSAGES
 ---------------------------------------------
@@ -194,6 +213,7 @@ QuickForge.Core = Ext.Require(MOD_PREFIX, "QuickForge/Core.lua")
 ---@field Funds integer? The player's matching funds (present when Outcome == "ok").
 ---@field Rows QuickForge.PickerRow[]? Picker rows (present for picker options).
 ---@field InvalidDonors table<string, string>? Refused Combine candidates: NetID string -> reason (EE2 message TSK suffix, or "QuickForge_Equipped").
+---@field DescriptionSuffix string? EE2-computed text appended to the option description (Dismantle's Splinters-granted number).
 
 ---Client request to commit a previewed Direct Operation.
 ---@class QuickForge.NetMsgs.Commit : NetLib_Message_Character, NetLib_Message_Item

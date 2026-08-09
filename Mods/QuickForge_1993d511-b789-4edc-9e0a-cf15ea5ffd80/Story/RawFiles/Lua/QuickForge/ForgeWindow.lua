@@ -37,14 +37,18 @@ local ROW_ALPHA_SELECTED = 0.5
 local ROW_ALPHA_INELIGIBLE = 0.1
 
 local UI = Generic.Create("QuickForge_ForgeWindow", {Visible = false})
-UI.PANEL_SIZE = V(400, 400)
-UI.PANEL_SIZE_PICKER = V(400, 610)
+UI.PANEL_SIZE = V(400, 460)
+UI.PANEL_SIZE_PICKER = V(400, 700)
 UI.HEADER_SIZE = V(380, 50)
-UI.DESC_SIZE = V(340, 120)
+UI.DESC_SIZE = V(340, 150)
 UI.LINE_SIZE = V(340, 30)
 UI.PICKER_SIZE = V(340, 230)
 UI.PICKER_ROW_SIZE = V(320, 32)
 UI.PICKER_ROW_SIZE_DONOR = V(320, 56)
+-- Vertical layout (absolute y positions; see _Layout for why).
+UI.DESC_Y = 150
+UI.PICKER_Y = 310
+UI.BOTTOM_BLOCK_HEIGHT = 150 -- Cost line, funds line, buttons, frame border.
 UI._Initialized = false
 ---The previewed operation awaiting confirmation, if the window is open.
 ---@type {ItemNetID: NetId, Option: string, PickerKind: QuickForge.PickerKind?, Rows: QuickForge.PickerRow[]?, InvalidDonors: table<string, string>?, FlatCost: integer?, Funds: integer, MatType: string?, SelectedKey: string?}?
@@ -104,25 +108,21 @@ function UI._Initialize()
     UI.DonorSlot = donorSlot
 
     local desc = TextPrefab.Create(UI, "Description", bg, "", "Center", UI.DESC_SIZE)
-    desc:SetPositionRelativeToParent("Top", 0, 155)
+    desc:SetPosition((UI.PANEL_SIZE[1] - UI.DESC_SIZE[1]) / 2, UI.DESC_Y)
     desc:GetMainElement():SetWordWrap(true)
     UI.DescriptionText = desc
 
     -- Picker list for the options that need a selection; hidden otherwise.
-    -- Positioned explicitly: relative-to-parent anchoring reads the list's
-    -- width at call time, which is 0 while it has no rows.
     local picker = bg:AddChild("PickerList", "GenericUI_Element_ScrollList")
     picker:SetFrame(UI.PICKER_SIZE:unpack())
     picker:SetMouseWheelEnabled(true)
-    picker:SetPosition((UI.PANEL_SIZE[1] - UI.PICKER_ROW_SIZE[1]) / 2, 280)
+    picker:SetPosition((UI.PANEL_SIZE[1] - UI.PICKER_ROW_SIZE[1]) / 2, UI.PICKER_Y)
     UI.PickerList = picker
 
     local cost = TextPrefab.Create(UI, "CostLine", bg, "", "Center", UI.LINE_SIZE)
-    cost:SetPositionRelativeToParent("Bottom", 0, -105)
     UI.CostText = cost
 
     local funds = TextPrefab.Create(UI, "FundsLine", bg, "", "Center", UI.LINE_SIZE)
-    funds:SetPositionRelativeToParent("Bottom", 0, -75)
     UI.FundsText = funds
 
     -- A horizontal list lays the pair out side by side regardless of the
@@ -144,16 +144,17 @@ function UI._Initialize()
     end)
 
     buttonList:RepositionElements()
-    buttonList:SetPositionRelativeToParent("Bottom", 0, -30)
 
     UI:SetPanelSize(UI.PANEL_SIZE)
     UI._Initialized = true
 end
 
----Sizes the panel for the option at hand and re-anchors the bottom-row
----elements (bottom-relative positions are computed at call time, not live).
----The Donor picker shifts the target item aside to make room for the Donor
----slot next to it.
+---Sizes the panel for the option at hand and lays out the bottom block at
+---absolute positions. Bottom-relative anchoring is unusable here: it
+---measures the background's content bounding box — which grows as children
+---land on it — not the panel texture, so anchored elements drift below the
+---frame. The Donor picker also shifts the target item aside to make room
+---for the Donor slot next to it.
 ---@param pickerKind QuickForge.PickerKind?
 function UI._Layout(pickerKind)
     local size = pickerKind ~= nil and UI.PANEL_SIZE_PICKER or UI.PANEL_SIZE
@@ -170,9 +171,15 @@ function UI._Layout(pickerKind)
         UI.ItemSlot.SlotElement:SetPositionRelativeToParent("Top", 0, 75)
     end
 
-    UI.CostText:SetPositionRelativeToParent("Bottom", 0, -105)
-    UI.FundsText:SetPositionRelativeToParent("Bottom", 0, -75)
-    UI.ButtonList:SetPositionRelativeToParent("Bottom", 0, -30)
+    local lineX = (size[1] - UI.LINE_SIZE[1]) / 2
+    local bottomTop = size[2] - UI.BOTTOM_BLOCK_HEIGHT
+    UI.CostText:SetPosition(lineX, bottomTop)
+    UI.FundsText:SetPosition(lineX, bottomTop + 30)
+    local buttonsWidth = UI.ButtonList:GetWidth()
+    if not buttonsWidth or buttonsWidth <= 0 then
+        buttonsWidth = 270 -- Fallback near the two buttons' texture widths.
+    end
+    UI.ButtonList:SetPosition((size[1] - buttonsWidth) / 2, bottomTop + 65)
 end
 
 ---------------------------------------------
@@ -452,7 +459,19 @@ function UI.Open(item, preview)
 
     UI.Panel.HeaderText:SetText(GetOptionLabel(preview.Option))
     UI.ItemSlot:SetItem(item)
-    UI.DescriptionText:SetText(Text.GetTranslatedString("AMER_UI_Greatforge_Desc_" .. preview.Option, ""))
+
+    -- EE2's options resolve by string handle (their keys live only in a key
+    -- bank the extender's key lookup misses); Epip's options register their
+    -- keys at runtime and resolve by key.
+    local descHandle = QuickForge.EE2_DESC_HANDLES[preview.Option]
+    local description = descHandle
+        and Text.GetTranslatedString(descHandle, "")
+        or Text.GetTranslatedString("AMER_UI_Greatforge_Desc_" .. preview.Option, "")
+    if preview.DescriptionSuffix then
+        description = description .. preview.DescriptionSuffix
+    end
+    UI.DescriptionText:SetText(description)
+
     UI.FundsText:SetText(QuickForge.TranslatedStrings.ForgeWindow_CurrentFunds:GetString():format(preview.Funds))
 
     UI._Layout(pickerKind)
