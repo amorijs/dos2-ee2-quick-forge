@@ -23,6 +23,9 @@ An addon for Divinity: Original Sin 2 (Definitive Edition) + Epic Encounters 2 (
 - **Forge Window** — QuickForge's confirm window for a Direct Operation: item icon with native tooltip, option description, cost alongside the player's current Splinters, Confirm/Cancel.
 - **Instant Operation** — executing a Greatforge option immediately from the context menu with no UI visit. Epip's existing Dismantle and Extract Runes entries behave this way.
 - **Applicable Option** — a Greatforge option that is valid for a given item (e.g. Focalize is applicable only to Artifacts). The context menu shows only applicable options.
+- **Property** — a non-implicit, deltamod-backed bonus on an item. The unit the picker options operate on: Masterwork uptiers one, Cull Properties keeps one and drops the rest, Combine transfers a Donor's single one.
+- **Picker** — the selection step a picker option requires before confirming: choosing a Property (Masterwork, Cull Properties) or a Donor (Combine). In QuickForge, pickers live inside the Forge Window as a selectable list.
+- **Donor** — the item Combine consumes to transfer its single Property onto the target item.
 
 ## Settled decisions (summary)
 
@@ -46,3 +49,16 @@ An addon for Divinity: Original Sin 2 (Definitive Edition) + Epic Encounters 2 (
 - Submenu entries are names only — no cost preview in v1.
 - Zero configuration in v1.
 - Keyboard & mouse only (hard constraint: Epip's context-menu system is disabled on controller).
+
+## Phase 2 decisions (in design, 2026-08-08)
+
+- Phase 2 is **strictly** the three picker options (Masterwork, Cull Properties, Combine) becoming Direct Operations. All other deferred items stay deferred.
+- Built and play-tested **incrementally**, in order Masterwork → Cull Properties → Combine; each option flips from Jump to Direct Operation independently as it lands.
+- Pickers live **inside the Forge Window** — one window with a selectable list; choosing a row updates the displayed cost, Confirm commits. No second window, no context-menu picker.
+- Property pickers (Masterwork, Cull Properties) show ineligible rows **greyed with the reason**; the Combine donor picker shows **only valid Donors**.
+- Masterwork picker rows show the Property's name, current → uptiered value, and that Property's own per-row cost (read live from EE2's data, per the never-reimplement guardrail).
+- Combine Donors are drawn from the **whole party's inventories, excluding equipped items**.
+- **No pre-selection**: the picker opens with nothing chosen and Confirm disabled until the player picks a row; no double-click-to-commit. Eligible-but-unaffordable rows stay selectable with Confirm greyed (visual gate only — the server re-validates at commit, as in phase 1).
+- **Empty pickers still open the window**: all-ineligible property lists show every row greyed with its reason; a donorless Combine shows an explicit "no valid donors" state. No refusal dialog for emptiness.
+- The Combine donor selector is a **list plus drop slot**: scrollable rows (item icon, name, the transferred Property) beside an empty donor slot next to the target item; dragging an item onto the slot also selects it. The server-computed valid-donor set is authoritative for both paths — an invalid drop is refused with its reason.
+- Cull Properties adds **no warning beyond EE2's own description** of the rebuild; the success toast fires at commit acceptance (matching the other async options), not at item delivery.
