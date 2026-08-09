@@ -27,7 +27,7 @@ same costs, same results. QuickForge just saves you the walk.
 standalone mod):
 
 - [Norbyte's Script Extender](https://github.com/Norbyte/ositools) (v60 or newer)
-- Epic Encounters 2 — both **EE2 Core** and **EE2**
+- [Epic Encounters 2](https://docs.google.com/document/d/1du5jE2dyDE4B4-Za0wolfe50ReeKXqkqdgG5FvAwKTo/edit?tab=t.0) — both **EE2 Core** and **EE2**
 - [Epip Encounters](https://github.com/PinewoodPip/EpipEncounters)
 
 **Then:**
