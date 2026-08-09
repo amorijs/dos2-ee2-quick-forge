@@ -1,5 +1,15 @@
 # QuickForge
 
+<img width="536" height="420" alt="image" src="https://github.com/user-attachments/assets/25239975-8606-44ae-b020-ec8e94b5f600" />
+
+<img width="407" height="420" alt="image" src="https://github.com/user-attachments/assets/975ed535-bc53-41c2-b0d9-cf4294c735f8" />
+
+<img width="400" height="728" alt="image" src="https://github.com/user-attachments/assets/ca5bc1d7-00d5-4aa0-8b00-0a87f9f4112e" />
+
+<img width="599" height="727" alt="image" src="https://github.com/user-attachments/assets/56c9259a-0012-4c2c-a08e-36276ec5f34c" />
+
+
+
 Use the Greatforge straight from your inventory — no more trips to the
 console. For Divinity: Original Sin 2 (Definitive Edition) with Epic
 Encounters 2 and Epip Encounters.
