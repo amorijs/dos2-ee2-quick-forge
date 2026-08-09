@@ -14,6 +14,10 @@ return function(t)
         t.assertEquals(Core.GetPicker("Masterwork"), "property_uptier", "picker")
     end)
 
+    t.test("Cull Properties uses the property-keep picker", function()
+        t.assertEquals(Core.GetPicker("RemoveMods"), "property_keep", "picker")
+    end)
+
     t.test("non-picker options have no picker", function()
         for _, id in ipairs({"ExtractRunes", "Reduce", "LevelUp", "Focalize",
                              "Transmute", "AddSockets", "PIP_Engrave"}) do

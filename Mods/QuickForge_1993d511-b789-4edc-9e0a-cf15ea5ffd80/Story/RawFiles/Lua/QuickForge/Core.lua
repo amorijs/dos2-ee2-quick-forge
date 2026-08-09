@@ -102,7 +102,8 @@ Core.OPTIONS = {
     },
     {
         ID = "RemoveMods",
-        Route = "jump",
+        Route = "direct",
+        Picker = "property_keep",
         IsApplicable = function(facts)
             return facts.rarity ~= "Unique" and not facts.hasGreatforgeBlockedTag
         end,

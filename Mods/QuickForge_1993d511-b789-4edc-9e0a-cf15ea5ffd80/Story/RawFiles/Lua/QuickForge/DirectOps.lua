@@ -47,6 +47,11 @@ local INSTANCE = 0
 -- Drain delay for loot generated into the helper container; Epip's
 -- QuickReduce drains its container after 200 ms.
 local CONTAINER_DRAIN_DELAY = 0.25
+-- How long to wait for Cull's async item regeneration before giving up.
+-- EE2's own treasure dispatcher abandons requests after 200 ms
+-- (_AMER_GEN_QrysProcs_GenerateTreasure.txt); by 2 s the request is
+-- certainly either delivered or dropped.
+local REBUILD_TIMEOUT = 2.0
 
 ---@class QuickForge.ItemSpecs Item facts in EE2's BenchedItem vocabulary.
 ---@field Level number
@@ -150,6 +155,10 @@ function QuickForge._ClearSeededRows()
     Osi.DB_AMER_UI_Greatforge_Masterwork_ValidatedMods:Delete(INSTANCE,
         nil, nil, nil, nil, nil, nil, nil, nil, nil)
     Osi.DB_AMER_UI_Greatforge_Masterwork_SelectedMod:Delete(INSTANCE, nil)
+    -- Cull rows/selection: EE2's DoCraft runs RemoveMods_Cleanup itself on
+    -- success, but a refused commit (e.g. funds) leaves our seeds behind.
+    Osi.DB_AMER_UI_Greatforge_RemoveMods_ModsOfItem:Delete(INSTANCE, nil, nil)
+    Osi.DB_AMER_UI_Greatforge_RemoveMods_SelectedMod:Delete(INSTANCE, nil)
 end
 
 ---Whether EE2 (or, for AddSockets, Core's own socket rule) rejects the
@@ -294,6 +303,30 @@ function QuickForge._BuildMasterworkRows(specs)
     return rows, raws
 end
 
+---Builds the Cull picker rows: the item's Properties as EE2 counted them.
+---Reads the CountedMods snapshot left behind by EE2's
+---InvalidSelection("RemoveMods") run (which _RunBenched just performed);
+---EE2 de-duplicates per prefix keeping the highest value, so the prefix is
+---a stable row key. Every row is selectable — Cull keeps any one Property.
+---@return QuickForge.PickerRow[]?, table<string, {Index: integer, Deltamod: string}>?
+function QuickForge._BuildKeepRows()
+    local counted = Osi.DB_AMER_Detamods_OUTPUT_CountedMods:Get(nil, nil, nil, nil, nil)
+    if not counted or not counted[1] then return nil end
+
+    local rows, raws = {}, {}
+    for _, row in ipairs(counted) do
+        local index, prefix, deltamod, value = row[1], row[3], row[4], row[5]
+        table.insert(rows, {
+            Key = prefix,
+            Prefix = prefix,
+            Current = value,
+            Eligible = true,
+        })
+        raws[prefix] = {Index = index, Deltamod = deltamod}
+    end
+    return rows, raws
+end
+
 ---Reserves an invisible helper container to stand in for the forge's craft
 ---object: required for the Funds_RequestSuccess -> DoCraft hop, and the
 ---target of item-generating options (Dismantle, Transmute).
@@ -318,12 +351,72 @@ function QuickForge._ReleaseCraftContainer(containerGuid, charGuid)
 end
 
 function QuickForge._TryCompleteInternalGoal()
+    -- Cull's regeneration return rule lives inside the internal goal; while
+    -- a rebuilt item is still in flight, completing the goal would strand it.
+    if QuickForge._PendingRebuilds[1] then
+        return
+    end
     local users = Osi.DB_AMER_UI_UsersInUI:Get(nil, nil, nil)
     if not users or not users[1] then
         -- Guarded on SysIsActive internally; safe if already complete.
         Osi.PROC_AMER_GEN_Goal_Complete(INTERNAL_GOAL)
     end
 end
+
+---------------------------------------------
+-- CULL (RemoveMods) ASYNC REBUILD
+---------------------------------------------
+
+-- Cull's DoCraft destroys the item and requests a regenerated replacement
+-- through EE2's treasure system; the return rule (delivery to the
+-- character) runs inside the internal goal, asynchronously, up to ~200 ms
+-- later. Each watch token keeps the goal alive across one such round-trip.
+---@type {Done: boolean}[]
+QuickForge._PendingRebuilds = {}
+
+---Starts watching one pending regeneration round-trip. The goal is held
+---active until EE2's return rule fires — or until the timeout, after which
+---the request is certainly dropped (EE2's own dispatcher abandons requests
+---after 200 ms) and only the leftover request row remains to sweep.
+function QuickForge._BeginRebuildWatch()
+    local token = {Done = false}
+    table.insert(QuickForge._PendingRebuilds, token)
+
+    Timer.Start(REBUILD_TIMEOUT, function(_)
+        QuickForge._FinishRebuildWatch(token, true)
+    end)
+end
+
+---@param token {Done: boolean}
+---@param dropped boolean True when the round-trip timed out instead of returning.
+function QuickForge._FinishRebuildWatch(token, dropped)
+    if token.Done then return end
+    token.Done = true
+
+    for i, pending in ipairs(QuickForge._PendingRebuilds) do
+        if pending == token then
+            table.remove(QuickForge._PendingRebuilds, i)
+            break
+        end
+    end
+    if dropped then
+        Osi.DB_AMER_UI_Greatforge_RemoveMods_NewItemRequest:Delete(
+            nil, INSTANCE, nil, nil, nil, nil, nil, nil, nil)
+    end
+    QuickForge._TryCompleteInternalGoal()
+end
+
+-- The rebuilt item was delivered (EE2's own return rule has already
+-- regenerated its mods, re-applied the kept Property, and moved it to the
+-- character): release the oldest watch.
+Ext.Osiris.RegisterListener("PROC_AMER_GEN_GenerateTreasure_Returned", 4, "after",
+    function(_, _, returnEvent, _)
+        if returnEvent ~= "AMER_UI_Greatforge_RemoveMods_NewItemMade" then return end
+        local token = QuickForge._PendingRebuilds[1]
+        if token then
+            QuickForge._FinishRebuildWatch(token, false)
+        end
+    end)
 
 ---------------------------------------------
 -- COMMIT OUTCOME LISTENERS
@@ -433,10 +526,17 @@ function QuickForge._BuildPreview(char, option, specs)
 
     local cost = QuickForge._GenerateCost(option, specs)
     if not cost then return "error" end
+
+    local rows = nil
+    if picker == "property_keep" then
+        rows = QuickForge._BuildKeepRows()
+        if not rows then return "error" end
+    end
     return "ok", {
         MatType = cost.MatType,
         Cost = cost.Amount,
         Funds = QuickForge._GetFunds(char, cost),
+        Rows = rows,
     }
 end
 
@@ -447,6 +547,7 @@ end
 ---@field MatType string
 ---@field Root string
 ---@field Seed fun()? Seeds the option's selection DBs just before OptionRequested.
+---@field OnCrafted fun()? Runs right after EE2's DoCraft accepted the commit.
 
 ---Resolves a commit's plan, re-deriving and re-validating any picker
 ---selection against EE2's current data. Returns a refusal outcome instead
@@ -484,6 +585,36 @@ function QuickForge._PrepareCommit(char, option, specs, selectionKey)
             Root = mat.Root,
             Seed = function()
                 Osi.DB_AMER_UI_Greatforge_Masterwork_SelectedMod(INSTANCE, raw.Index)
+            end,
+        }
+    end
+
+    if picker == "property_keep" then
+        local rows, raws = QuickForge._BuildKeepRows()
+        if not rows then return "error" end
+        local row = Core.FindPickerRow(rows, selectionKey)
+        if not row then return "stale_selection" end
+        local cost = QuickForge._GenerateCost(option, specs)
+        if not cost then return "error" end
+        return nil, {
+            Cost = cost.Amount,
+            MatType = cost.MatType,
+            Root = cost.Root,
+            Seed = function()
+                -- The full row list plus the kept row's index, exactly what
+                -- EE2's confirm page would have seeded; DoCraft joins
+                -- SelectedMod -> ModsOfItem and runs its own cleanup.
+                for _, seeded in pairs(raws) do
+                    Osi.DB_AMER_UI_Greatforge_RemoveMods_ModsOfItem(
+                        INSTANCE, seeded.Index, seeded.Deltamod)
+                end
+                Osi.DB_AMER_UI_Greatforge_RemoveMods_SelectedMod(INSTANCE, raws[row.Key].Index)
+            end,
+            OnCrafted = function()
+                -- The old item is gone and the regenerated one is in
+                -- flight; hold the internal goal open across the
+                -- round-trip so EE2's return rule can deliver it.
+                QuickForge._BeginRebuildWatch()
             end,
         }
     end
@@ -538,6 +669,7 @@ Net.RegisterListener(QuickForge.NETMSG_COMMIT, function(payload)
         QuickForge._CraftWatch = nil
 
         if watch.Crafted then
+            if plan.OnCrafted then plan.OnCrafted() end
             -- Loot lands in the reserved container (the UI-coupled completion
             -- rule that would hand it over never fires). Drain now and once
             -- more shortly after, then release and complete the goal.
@@ -569,6 +701,10 @@ end)
 
 -- A crash/save between seeding and cleanup can persist instance-0 rows into
 -- the savegame; sweep them on load (Epip's QuickReduce does the same).
+-- A Cull rebuild pending at save time cannot resume (the treasure system's
+-- async hop does not survive a reload): drop its request row too, so no
+-- seeded rows linger and the goal can complete. The in-memory watch list is
+-- fresh after a load, so nothing holds the goal open either.
 Ext.Osiris.RegisterListener("SavegameLoaded", 4, "after", function(_, _, _, _)
     local reserved = Osi.DB_AMER_UI_Greatforge_CraftObject_Reserved:Get(INSTANCE, nil)
     if reserved then
@@ -578,5 +714,7 @@ Ext.Osiris.RegisterListener("SavegameLoaded", 4, "after", function(_, _, _, _)
         Osi.DB_AMER_UI_Greatforge_CraftObject_Reserved:Delete(INSTANCE, nil)
     end
     QuickForge._ClearSeededRows()
+    Osi.DB_AMER_UI_Greatforge_RemoveMods_NewItemRequest:Delete(
+        nil, INSTANCE, nil, nil, nil, nil, nil, nil, nil)
     QuickForge._TryCompleteInternalGoal()
 end)

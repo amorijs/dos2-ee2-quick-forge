@@ -138,10 +138,12 @@ return function(t)
         t.assertEquals(Core.GetRoute("Masterwork"), "direct", "Masterwork")
     end)
 
-    t.test("the remaining picker options route jump until their tickets land", function()
-        for _, id in ipairs({"RemoveMods", "Combine"}) do
-            t.assertEquals(Core.GetRoute(id), "jump", id)
-        end
+    t.test("Cull Properties routes direct (ticket 02)", function()
+        t.assertEquals(Core.GetRoute("RemoveMods"), "direct", "RemoveMods")
+    end)
+
+    t.test("Combine routes jump until its ticket lands", function()
+        t.assertEquals(Core.GetRoute("Combine"), "jump", "Combine")
     end)
 
     t.test("GetRoute returns nil for unknown options", function()
