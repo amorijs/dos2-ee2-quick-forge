@@ -1,23 +1,25 @@
 # QuickForge
 
-Adds Greatforge access to the equipment right-click context menu, for
-Divinity: Original Sin 2 (DE) + Epic Encounters 2 + Epip Encounters.
+Use the Greatforge straight from your inventory — no more trips to the
+console. For Divinity: Original Sin 2 (Definitive Edition) with Epic
+Encounters 2 and Epip Encounters.
 
-A right-click on any equipment shows a **Greatforge** submenu listing the
-applicable Greatforge options. The seven non-picker options (Empower,
-Focalize, Extract Runes, Drill Sockets, Transmute, Dismantle, Engrave)
-execute **in place**: a small confirm window (the *Forge Window*) shows the
-item, EE2's own option description, and the live EE2-computed cost next to
-your funds — confirm and the operation commits through EE2's own request
-pipeline, with no Ascension visit. The picker options (Masterwork, Cull
-Properties, Combine) and the "Open in Greatforge..." fallback entry *Jump*
-instead: the Greatforge opens with the item already benched.
+Right-click any piece of equipment and you'll find a new **Greatforge**
+submenu with every option available for that item. Clicking any option opens a confirmation window 
+showing the item, what the operation does, and what it will cost you next to what you can afford —
+click Confirm and it's done.
 
-QuickForge never reimplements Greatforge rules: validation, costs, payment,
-and effects are EE2's own, invoked programmatically (see
-`docs/adr/0001-quickforge-ui-replaces-greatforge-confirm.md`).
+Everything works exactly as it does at the real Greatforge — same rules,
+same costs, same results. QuickForge just saves you the walk.
 
-See `CONTEXT.md` for the glossary and settled design decisions.
+**Requires:** Epic Encounters Core, Epip Encounters, and Norbyte's Script
+Extender (v60+). Keyboard & mouse only. Load order: EE2 Core → EE2 → Epip →
+QuickForge.
+
+---
+
+*The sections below are for developers. See `CONTEXT.md` for the glossary
+and design decisions.*
 
 ## Layout
 
