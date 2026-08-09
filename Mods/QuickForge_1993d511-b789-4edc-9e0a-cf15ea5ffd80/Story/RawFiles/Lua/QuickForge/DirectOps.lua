@@ -159,6 +159,8 @@ function QuickForge._ClearSeededRows()
     -- success, but a refused commit (e.g. funds) leaves our seeds behind.
     Osi.DB_AMER_UI_Greatforge_RemoveMods_ModsOfItem:Delete(INSTANCE, nil, nil)
     Osi.DB_AMER_UI_Greatforge_RemoveMods_SelectedMod:Delete(INSTANCE, nil)
+    -- Combine's Donor row: EE2 clears it on page-leave, never in DoCraft.
+    Osi.DB_AMER_UI_Greatforge_Combine_ItemToAdd:Delete(INSTANCE, nil, nil)
 end
 
 ---Whether EE2 (or, for AddSockets, Core's own socket rule) rejects the
@@ -323,6 +325,123 @@ function QuickForge._BuildKeepRows()
             Eligible = true,
         })
         raws[prefix] = {Index = index, Deltamod = deltamod}
+    end
+    return rows, raws
+end
+
+---------------------------------------------
+-- COMBINE DONORS
+---------------------------------------------
+
+---The benched-side context Combine's donor checks compare against: the
+---target's mods (from the CountedMods snapshot EE2's
+---InvalidSelection("Combine") run left behind — the same snapshot EE2's
+---own page stashes into Combine_BenchedMods) and the target's rarity as a
+---REAL, converted through EE2's own DB_AMER_GEN_ItemRarity mapping.
+---Must be captured before any donor iteration clobbers CountedMods.
+---@param specs QuickForge.ItemSpecs
+---@return {BenchedMods: {Prefix: string, Deltamod: string, Value: integer}[], RarityReal: number}
+function QuickForge._GetCombineContext(specs)
+    local benchedMods = {}
+    local counted = Osi.DB_AMER_Detamods_OUTPUT_CountedMods:Get(nil, nil, nil, nil, nil)
+    for _, row in ipairs(counted or {}) do
+        table.insert(benchedMods, {Prefix = row[3], Deltamod = row[4], Value = row[5]})
+    end
+
+    local rarityRows = Osi.DB_AMER_GEN_ItemRarity:Get(nil, specs.ItemType)
+    local rarityInt = rarityRows and rarityRows[1] and rarityRows[1][1] or -1
+    return {BenchedMods = benchedMods, RarityReal = rarityInt * 1.0}
+end
+
+---Runs EE2's donor checks for one candidate, silently: the page-driven
+---wrapper queries open message boxes, so this calls the underlying
+---always-active Deltamods queries and composes their verdicts through
+---Core.EvaluateDonor (which owns the ordering and the rarity exception).
+---Clobbers the CountedMods output DB.
+---@param item EsvItem The target (benched) item.
+---@param specs QuickForge.ItemSpecs
+---@param context {BenchedMods: {Prefix: string, Deltamod: string, Value: integer}[], RarityReal: number}
+---@param candidate EsvItem
+---@return {valid: boolean, reason: string?}, string? donorPrefix, string? donorDeltamod
+function QuickForge._EvaluateDonorCandidate(item, specs, context, candidate)
+    local facts = {
+        isTargetItem = candidate.MyGuid == item.MyGuid,
+        modCount = 0,
+        hasSamePrefix = false,
+        hasExcludedPrefix = false,
+        rollFailReason = nil,
+    }
+    local donorPrefix, donorDeltamod, donorValue
+
+    if not facts.isTargetItem then
+        Osi.QRY_AMER_Deltamods_IterateMods_NotImplicit(candidate.MyGuid)
+        local counted = Osi.DB_AMER_Detamods_OUTPUT_CountedMods:Get(nil, nil, nil, nil, nil) or {}
+        facts.modCount = #counted
+        if facts.modCount == 1 then
+            donorPrefix, donorDeltamod, donorValue = counted[1][3], counted[1][4], counted[1][5]
+
+            for _, benched in ipairs(context.BenchedMods) do
+                if benched.Prefix == donorPrefix then
+                    facts.hasSamePrefix = true
+                    break
+                end
+            end
+
+            if not facts.hasSamePrefix then
+                for _, benched in ipairs(context.BenchedMods) do
+                    if Osi.QRY_AMER_Deltamods_PrefixesExclusive(donorPrefix, donorValue,
+                        benched.Prefix, benched.Value, specs.Slot, specs.SubType, specs.Handedness) == true then
+                        facts.hasExcludedPrefix = true
+                        break
+                    end
+                end
+            end
+
+            if not facts.hasSamePrefix and not facts.hasExcludedPrefix
+                and Osi.QRY_AMER_Deltamods_CanItemRollPrefixValue(context.RarityReal, specs.Level,
+                    donorPrefix, donorValue, specs.Slot, specs.SubType, specs.Handedness) ~= true then
+                local reasonRows = Osi.DB_AMER_Deltamods_CanItemRollPrefixValue_FailReason:Get(nil)
+                facts.rollFailReason = reasonRows and reasonRows[1] and reasonRows[1][1] or "Unknown"
+                if facts.rollFailReason == "Rarity" then
+                    -- EE2's own exception pops the row so it cannot leak
+                    -- into a later check (:2067); mirror that.
+                    Osi.DB_AMER_Deltamods_CanItemRollPrefixValue_FailReason:Delete("Rarity")
+                end
+            end
+        end
+    end
+
+    return Core.EvaluateDonor(facts), donorPrefix, donorDeltamod
+end
+
+---Builds the Combine donor rows: every item across the whole party's
+---inventories (equipped items excluded) that passes EE2's donor checks.
+---An empty result is a legitimate state — the window shows it explicitly.
+---@param char EsvCharacter
+---@param item EsvItem
+---@param specs QuickForge.ItemSpecs
+---@return QuickForge.PickerRow[], table<string, {Guid: string, Deltamod: string}>
+function QuickForge._BuildDonorRows(char, item, specs)
+    local context = QuickForge._GetCombineContext(specs)
+
+    local rows, raws = {}, {}
+    local candidates = Item.GetItemsInPartyInventory(char, function(candidate)
+        return candidate.Stats ~= nil and Item.IsEquipment(candidate)
+    end, true)
+    for _, candidate in ipairs(candidates) do
+        if Osi.IsEquipped(candidate.MyGuid) ~= true then
+            local verdict, donorPrefix, donorDeltamod =
+                QuickForge._EvaluateDonorCandidate(item, specs, context, candidate)
+            if verdict.valid then
+                table.insert(rows, {
+                    Key = candidate.MyGuid,
+                    ItemNetID = candidate.NetID,
+                    Prefix = donorPrefix,
+                    Eligible = true,
+                })
+                raws[candidate.MyGuid] = {Guid = candidate.MyGuid, Deltamod = donorDeltamod}
+            end
+        end
     end
     return rows, raws
 end
@@ -506,10 +625,11 @@ end
 
 ---Builds the preview reply's cost/picker fields for an option.
 ---@param char EsvCharacter
+---@param item EsvItem
 ---@param option string
 ---@param specs QuickForge.ItemSpecs
 ---@return QuickForge.OperationOutcome, table?
-function QuickForge._BuildPreview(char, option, specs)
+function QuickForge._BuildPreview(char, item, option, specs)
     local picker = Core.GetPicker(option)
 
     if picker == "property_uptier" then
@@ -531,6 +651,10 @@ function QuickForge._BuildPreview(char, option, specs)
     if picker == "property_keep" then
         rows = QuickForge._BuildKeepRows()
         if not rows then return "error" end
+    elseif picker == "donor" then
+        -- A donorless party is a legitimate preview: the window opens with
+        -- an explicit empty state, not a refusal dialog.
+        rows = QuickForge._BuildDonorRows(char, item, specs)
     end
     return "ok", {
         MatType = cost.MatType,
@@ -553,12 +677,13 @@ end
 ---selection against EE2's current data. Returns a refusal outcome instead
 ---when the commit may not proceed.
 ---@param char EsvCharacter
+---@param item EsvItem
 ---@param option string
 ---@param specs QuickForge.ItemSpecs
 ---@param selectionKey string?
 ---@return QuickForge.OperationOutcome? refusal
 ---@return QuickForge.CommitPlan?
-function QuickForge._PrepareCommit(char, option, specs, selectionKey)
+function QuickForge._PrepareCommit(char, item, option, specs, selectionKey)
     local picker = Core.GetPicker(option)
 
     if picker == "property_uptier" then
@@ -619,6 +744,36 @@ function QuickForge._PrepareCommit(char, option, specs, selectionKey)
         }
     end
 
+    if picker == "donor" then
+        -- Re-validate the chosen Donor against EE2's checks right now: it
+        -- must still exist, sit unequipped in the party's inventories, and
+        -- pass every donor rule against the target's current mods. The
+        -- server-computed valid-Donor set stays authoritative; anything
+        -- less refuses as stale through the failure dialog.
+        local context = QuickForge._GetCombineContext(specs)
+        local resolved, donor = pcall(Item.Get, selectionKey)
+        if not resolved or not donor then return "stale_selection" end
+        local inParty = Osi.ItemIsInPartyInventory(donor.MyGuid, char.MyGuid, 0)
+        if inParty ~= 1 and inParty ~= true then return "stale_selection" end
+        if Osi.IsEquipped(donor.MyGuid) == true then return "stale_selection" end
+        local verdict, _, donorDeltamod = QuickForge._EvaluateDonorCandidate(item, specs, context, donor)
+        if not verdict.valid or not donorDeltamod then return "stale_selection" end
+
+        local cost = QuickForge._GenerateCost(option, specs)
+        if not cost then return "error" end
+        return nil, {
+            Cost = cost.Amount,
+            MatType = cost.MatType,
+            Root = cost.Root,
+            Seed = function()
+                -- What EE2's page stores when a Donor is dropped on the
+                -- bench; DoCraft consumes the Donor and grants its
+                -- Property from this row.
+                Osi.DB_AMER_UI_Greatforge_Combine_ItemToAdd(INSTANCE, donor.MyGuid, donorDeltamod)
+            end,
+        }
+    end
+
     local cost = QuickForge._GenerateCost(option, specs)
     if not cost then return "error" end
     return nil, {Cost = cost.Amount, MatType = cost.MatType, Root = cost.Root}
@@ -629,7 +784,7 @@ Net.RegisterListener(QuickForge.NETMSG_PREVIEW_REQUEST, function(payload)
     if not char then return end
 
     local outcome, costFields = QuickForge._RunBenched(char, item, option, function(specs)
-        return QuickForge._BuildPreview(char, option, specs)
+        return QuickForge._BuildPreview(char, item, option, specs)
     end)
 
     local reply = {
@@ -654,7 +809,7 @@ Net.RegisterListener(QuickForge.NETMSG_COMMIT, function(payload)
     local itemNetID = item.NetID
 
     local outcome = QuickForge._RunBenched(char, item, option, function(specs)
-        local refusal, plan = QuickForge._PrepareCommit(char, option, specs, selectionKey)
+        local refusal, plan = QuickForge._PrepareCommit(char, item, option, specs, selectionKey)
         if refusal then return refusal end
 
         local container = QuickForge._ReserveCraftContainer()

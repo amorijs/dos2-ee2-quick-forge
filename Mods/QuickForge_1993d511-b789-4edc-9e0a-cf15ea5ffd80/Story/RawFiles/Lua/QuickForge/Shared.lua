@@ -134,6 +134,11 @@ local QuickForge = {
             Text = "Select a property to see its cost.",
             ContextDescription = "Forge Window cost line before a per-Property-priced picker (Masterwork) has a selection",
         },
+        Picker_NoDonors = {
+            Handle = "h1d9e83f2g7a06g4b3cg8f51g92c4e07ba6d3",
+            Text = "No item in the party can be combined into this one.",
+            ContextDescription = "Forge Window empty state for a donorless Combine picker",
+        },
     },
 }
 Epip.RegisterFeature("QuickForge", "QuickForge", QuickForge)

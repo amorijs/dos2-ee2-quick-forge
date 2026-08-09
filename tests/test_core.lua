@@ -142,8 +142,8 @@ return function(t)
         t.assertEquals(Core.GetRoute("RemoveMods"), "direct", "RemoveMods")
     end)
 
-    t.test("Combine routes jump until its ticket lands", function()
-        t.assertEquals(Core.GetRoute("Combine"), "jump", "Combine")
+    t.test("Combine routes direct (ticket 03)", function()
+        t.assertEquals(Core.GetRoute("Combine"), "direct", "Combine")
     end)
 
     t.test("GetRoute returns nil for unknown options", function()

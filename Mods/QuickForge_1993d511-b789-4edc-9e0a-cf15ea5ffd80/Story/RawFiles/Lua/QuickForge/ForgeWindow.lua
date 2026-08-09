@@ -42,9 +42,10 @@ UI.DESC_SIZE = V(340, 120)
 UI.LINE_SIZE = V(340, 30)
 UI.PICKER_SIZE = V(340, 230)
 UI.PICKER_ROW_SIZE = V(320, 32)
+UI.PICKER_ROW_SIZE_DONOR = V(320, 56)
 UI._Initialized = false
 ---The previewed operation awaiting confirmation, if the window is open.
----@type {ItemNetID: NetId, Option: string, Rows: QuickForge.PickerRow[]?, FlatCost: integer?, Funds: integer, MatType: string?, SelectedKey: string?}?
+---@type {ItemNetID: NetId, Option: string, PickerKind: QuickForge.PickerKind?, Rows: QuickForge.PickerRow[]?, FlatCost: integer?, Funds: integer, MatType: string?, SelectedKey: string?}?
 UI._Current = nil
 ---Per-row UI pieces of the open picker, by row key.
 ---@type table<string, {Background: GenericUI_Element_TiledBackground, Text: GenericUI_Prefab_Text, Row: QuickForge.PickerRow}>
@@ -152,19 +153,28 @@ function UI._GetRowReason(row)
     return ""
 end
 
----A property row's one-line label: name, value change, per-row cost.
+---A row's one-line label. Property rows: name, value change, per-row cost.
+---Donor rows: the item's name and the Property it would transfer.
 ---@param row QuickForge.PickerRow
 ---@param selected boolean
 ---@return string
 function UI._GetRowLabel(row, selected)
-    local label = Text.GetTranslatedString("AMER_Deltamod_" .. row.Prefix, row.Prefix)
-    if row.Current ~= nil and row.Uptiered ~= nil then
-        label = ("%s  %d -> %d"):format(label, row.Current, row.Uptiered)
-    elseif row.Current ~= nil then
-        label = ("%s  %d"):format(label, row.Current)
-    end
-    if row.Cost ~= nil then
-        label = ("%s  (%d)"):format(label, row.Cost)
+    local label
+    if row.ItemNetID ~= nil then
+        local donorItem = Item.Get(row.ItemNetID)
+        local name = donorItem and Item.GetDisplayName(donorItem) or ""
+        label = ("%s - %s"):format(name,
+            Text.GetTranslatedString("AMER_Deltamod_" .. row.Prefix, row.Prefix))
+    else
+        label = Text.GetTranslatedString("AMER_Deltamod_" .. row.Prefix, row.Prefix)
+        if row.Current ~= nil and row.Uptiered ~= nil then
+            label = ("%s  %d -> %d"):format(label, row.Current, row.Uptiered)
+        elseif row.Current ~= nil then
+            label = ("%s  %d"):format(label, row.Current)
+        end
+        if row.Cost ~= nil then
+            label = ("%s  (%d)"):format(label, row.Cost)
+        end
     end
 
     local color = ROW_COLOR_NORMAL
@@ -178,16 +188,52 @@ end
 
 ---Rebuilds the picker list for a fresh preview.
 ---@param rows QuickForge.PickerRow[]
-function UI._BuildPickerRows(rows)
+---@param pickerKind QuickForge.PickerKind
+function UI._BuildPickerRows(rows, pickerKind)
     local list = UI.PickerList
     list:Clear()
     UI._RowElements = {}
 
+    -- Zero valid Donors is a legitimate window: say so explicitly.
+    if not rows[1] and pickerKind == "donor" then
+        local empty = TextPrefab.Create(UI, "PickerEmptyState", list,
+            Text.Format(QuickForge.TranslatedStrings.Picker_NoDonors:GetString(),
+                {Color = ROW_COLOR_INELIGIBLE}),
+            "Center", UI.PICKER_ROW_SIZE)
+        empty:GetMainElement():SetWordWrap(true)
+        list:RepositionElements()
+        return
+    end
+
+    local isDonorPicker = pickerKind == "donor"
+    local rowSize = isDonorPicker and UI.PICKER_ROW_SIZE_DONOR or UI.PICKER_ROW_SIZE
+
     for i, row in ipairs(rows) do
         local rowBg = list:AddChild("PickerRow_" .. i, "GenericUI_Element_TiledBackground")
-        rowBg:SetBackground("Black", UI.PICKER_ROW_SIZE:unpack())
+        rowBg:SetBackground("Black", rowSize:unpack())
 
-        local text = TextPrefab.Create(UI, "PickerRowText_" .. i, rowBg, "", "Center", UI.PICKER_ROW_SIZE)
+        local text
+        if isDonorPicker then
+            -- Item icon with rarity frame and native tooltip, name and
+            -- transferred Property beside it.
+            local slot = HotbarSlotPrefab.Create(UI, "PickerRowSlot_" .. i, rowBg)
+            slot:SetUpdateDelay(-1)
+            slot:SetUsable(false)
+            slot.SlotElement:SetPosition(4, 2)
+            local donorItem = Item.Get(row.ItemNetID)
+            if donorItem then
+                slot:SetItem(donorItem)
+            end
+            slot.Events.Clicked:Subscribe(function(_)
+                UI._SelectRow(row.Key)
+            end)
+
+            text = TextPrefab.Create(UI, "PickerRowText_" .. i, rowBg, "", "Left",
+                V(rowSize[1] - 64, rowSize[2]))
+            text:SetPosition(62, 18)
+        else
+            text = TextPrefab.Create(UI, "PickerRowText_" .. i, rowBg, "", "Center", rowSize)
+        end
 
         if Core.IsPickerRowSelectable(row) then
             rowBg.Events.MouseUp:Subscribe(function(_)
@@ -280,10 +326,14 @@ end
 function UI.Open(item, preview)
     UI._Initialize()
 
+    -- Whether a picker is shown follows the option, not the reply: an empty
+    -- Donor list is a legitimate preview and must still open as a picker.
+    local pickerKind = Core.GetPicker(preview.Option)
     UI._Current = {
         ItemNetID = item.NetID,
         Option = preview.Option,
-        Rows = preview.Rows,
+        PickerKind = pickerKind,
+        Rows = pickerKind ~= nil and (preview.Rows or {}) or nil,
         FlatCost = preview.Cost,
         Funds = preview.Funds,
         MatType = preview.MatType,
@@ -295,9 +345,9 @@ function UI.Open(item, preview)
     UI.DescriptionText:SetText(Text.GetTranslatedString("AMER_UI_Greatforge_Desc_" .. preview.Option, ""))
     UI.FundsText:SetText(QuickForge.TranslatedStrings.ForgeWindow_CurrentFunds:GetString():format(preview.Funds))
 
-    UI._Layout(preview.Rows ~= nil)
-    if preview.Rows then
-        UI._BuildPickerRows(preview.Rows)
+    UI._Layout(pickerKind ~= nil)
+    if UI._Current.Rows then
+        UI._BuildPickerRows(UI._Current.Rows, pickerKind)
     end
     UI._RefreshCostAndConfirm()
 

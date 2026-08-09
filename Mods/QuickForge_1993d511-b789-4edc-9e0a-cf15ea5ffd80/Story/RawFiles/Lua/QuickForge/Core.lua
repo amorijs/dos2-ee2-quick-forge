@@ -110,7 +110,8 @@ Core.OPTIONS = {
     },
     {
         ID = "Combine",
-        Route = "jump",
+        Route = "direct",
+        Picker = "donor",
         IsApplicable = function(facts)
             return facts.rarity ~= "Common"
                 and (facts.rarity ~= "Unique" or facts.isArtifact)
@@ -220,6 +221,33 @@ function Core.CanConfirmPicker(row, flatCost, funds)
     end
     local cost = Core.GetPickerSelectionCost(row, flatCost)
     return cost ~= nil and funds >= cost
+end
+
+---Verdict for one Combine donor candidate, composing EE2's individually
+---callable donor checks in EE2's own order
+---(AMER_GLO_UI_Greatforge_Internal.txt:1946-1964). The page-driven wrapper
+---queries open message boxes as side effects, so the server calls the
+---underlying always-active queries and feeds their results here; this
+---function owns only the composition, including EE2's own exception that a
+---rarity-only roll failure is allowed (:2062-2067). Reasons are the
+---suffixes of EE2's "AMER_UI_Greatforge_Combine_*" message TSKs.
+---@param facts {isTargetItem: boolean, modCount: integer, hasSamePrefix: boolean, hasExcludedPrefix: boolean, rollFailReason: string?}
+---@return {valid: boolean, reason: string?}
+function Core.EvaluateDonor(facts)
+    if facts.isTargetItem then
+        return {valid = false, reason = "ItemAddedIsTheSame"}
+    elseif facts.modCount > 1 then
+        return {valid = false, reason = "ItemAddedHasTooManyMods"}
+    elseif facts.modCount < 1 then
+        return {valid = false, reason = "ItemAddedHasNoMods"}
+    elseif facts.hasSamePrefix then
+        return {valid = false, reason = "ItemAddedHasSamePrefix"}
+    elseif facts.hasExcludedPrefix then
+        return {valid = false, reason = "ItemAddedHasExcludedPrefix"}
+    elseif facts.rollFailReason ~= nil and facts.rollFailReason ~= "Rarity" then
+        return {valid = false, reason = "Fail_" .. facts.rollFailReason}
+    end
+    return {valid = true}
 end
 
 ---Finds a previewed row again by its stable key. Used at commit time to

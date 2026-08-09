@@ -18,6 +18,95 @@ return function(t)
         t.assertEquals(Core.GetPicker("RemoveMods"), "property_keep", "picker")
     end)
 
+    t.test("Combine uses the donor picker", function()
+        t.assertEquals(Core.GetPicker("Combine"), "donor", "picker")
+    end)
+
+    ----------------------------------------
+    -- EvaluateDonor: QuickForge's orchestration of EE2's individually
+    -- callable donor checks, in EE2's own order (the page-driven wrapper
+    -- opens message boxes, so the list filter calls the underlying queries
+    -- and re-composes their verdicts here). Reasons are the suffixes of
+    -- EE2's own "AMER_UI_Greatforge_Combine_*" message TSKs.
+    ----------------------------------------
+
+    ---A donor that passes every check; tests override one fact each.
+    local function makeDonorFacts(overrides)
+        local facts = {
+            isTargetItem = false,
+            modCount = 1,
+            hasSamePrefix = false,
+            hasExcludedPrefix = false,
+            rollFailReason = nil,
+        }
+        for k, v in pairs(overrides or {}) do
+            facts[k] = v
+        end
+        return facts
+    end
+
+    t.test("a donor passing every check is valid", function()
+        local verdict = Core.EvaluateDonor(makeDonorFacts())
+        t.assertEquals(verdict.valid, true, "valid")
+        t.assertEquals(verdict.reason, nil, "reason")
+    end)
+
+    t.test("the target item itself cannot be its own donor", function()
+        local verdict = Core.EvaluateDonor(makeDonorFacts({isTargetItem = true}))
+        t.assertEquals(verdict.valid, false, "valid")
+        t.assertEquals(verdict.reason, "ItemAddedIsTheSame", "reason")
+    end)
+
+    t.test("a donor with more than one property is refused", function()
+        local verdict = Core.EvaluateDonor(makeDonorFacts({modCount = 2}))
+        t.assertEquals(verdict.valid, false, "valid")
+        t.assertEquals(verdict.reason, "ItemAddedHasTooManyMods", "reason")
+    end)
+
+    t.test("a donor with no properties is refused", function()
+        local verdict = Core.EvaluateDonor(makeDonorFacts({modCount = 0}))
+        t.assertEquals(verdict.valid, false, "valid")
+        t.assertEquals(verdict.reason, "ItemAddedHasNoMods", "reason")
+    end)
+
+    t.test("a donor whose prefix the target already has is refused", function()
+        local verdict = Core.EvaluateDonor(makeDonorFacts({hasSamePrefix = true}))
+        t.assertEquals(verdict.valid, false, "valid")
+        t.assertEquals(verdict.reason, "ItemAddedHasSamePrefix", "reason")
+    end)
+
+    t.test("a donor whose prefix the target's mods exclude is refused", function()
+        local verdict = Core.EvaluateDonor(makeDonorFacts({hasExcludedPrefix = true}))
+        t.assertEquals(verdict.valid, false, "valid")
+        t.assertEquals(verdict.reason, "ItemAddedHasExcludedPrefix", "reason")
+    end)
+
+    t.test("a donor whose property the target cannot roll is refused with EE2's reason", function()
+        local verdict = Core.EvaluateDonor(makeDonorFacts({rollFailReason = "ItemTypes"}))
+        t.assertEquals(verdict.valid, false, "valid")
+        t.assertEquals(verdict.reason, "Fail_ItemTypes", "reason")
+    end)
+
+    t.test("a rarity-only roll failure passes (EE2's own exception)", function()
+        -- Mirrors AMER_GLO_UI_Greatforge_Internal.txt:2062-2067: the rarity
+        -- rule is deliberately not enforced for Combine.
+        local verdict = Core.EvaluateDonor(makeDonorFacts({rollFailReason = "Rarity"}))
+        t.assertEquals(verdict.valid, true, "valid")
+    end)
+
+    t.test("donor checks refuse in EE2's own order", function()
+        -- Same-item wins over everything; mod count over prefix checks.
+        t.assertEquals(Core.EvaluateDonor(makeDonorFacts({
+            isTargetItem = true, modCount = 5, hasSamePrefix = true,
+        })).reason, "ItemAddedIsTheSame", "same item first")
+        t.assertEquals(Core.EvaluateDonor(makeDonorFacts({
+            modCount = 2, hasSamePrefix = true, rollFailReason = "ItemTypes",
+        })).reason, "ItemAddedHasTooManyMods", "mod count before prefix checks")
+        t.assertEquals(Core.EvaluateDonor(makeDonorFacts({
+            hasSamePrefix = true, hasExcludedPrefix = true,
+        })).reason, "ItemAddedHasSamePrefix", "same prefix before excluded prefix")
+    end)
+
     t.test("non-picker options have no picker", function()
         for _, id in ipairs({"ExtractRunes", "Reduce", "LevelUp", "Focalize",
                              "Transmute", "AddSockets", "PIP_Engrave"}) do
