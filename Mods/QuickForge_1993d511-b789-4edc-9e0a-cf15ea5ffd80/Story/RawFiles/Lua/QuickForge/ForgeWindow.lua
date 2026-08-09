@@ -20,9 +20,11 @@ local ButtonPrefab = Generic.GetPrefab("GenericUI_Prefab_Button")
 local HotbarSlotPrefab = Generic.GetPrefab("GenericUI_Prefab_HotbarSlot")
 local CloseButtonPrefab = Generic.GetPrefab("GenericUI_Prefab_CloseButton")
 local Input = Client.Input
+local Tooltip = Client.Tooltip
 local V = Vector.Create
 
 local FAILURE_MSGBOX_ID = "QuickForge_OperationRefused"
+local DONOR_REFUSED_MSGBOX_ID = "QuickForge_DonorRefused"
 local MSGBOX_BUTTON_JUMP = 1
 local MSGBOX_BUTTON_DISMISS = 2
 
@@ -45,7 +47,7 @@ UI.PICKER_ROW_SIZE = V(320, 32)
 UI.PICKER_ROW_SIZE_DONOR = V(320, 56)
 UI._Initialized = false
 ---The previewed operation awaiting confirmation, if the window is open.
----@type {ItemNetID: NetId, Option: string, PickerKind: QuickForge.PickerKind?, Rows: QuickForge.PickerRow[]?, FlatCost: integer?, Funds: integer, MatType: string?, SelectedKey: string?}?
+---@type {ItemNetID: NetId, Option: string, PickerKind: QuickForge.PickerKind?, Rows: QuickForge.PickerRow[]?, InvalidDonors: table<string, string>?, FlatCost: integer?, Funds: integer, MatType: string?, SelectedKey: string?}?
 UI._Current = nil
 ---Per-row UI pieces of the open picker, by row key.
 ---@type table<string, {Background: GenericUI_Element_TiledBackground, Text: GenericUI_Prefab_Text, Row: QuickForge.PickerRow}>
@@ -74,6 +76,32 @@ function UI._Initialize()
     slot:SetUsable(false)
     slot.SlotElement:SetPositionRelativeToParent("Top", 0, 75)
     UI.ItemSlot = slot
+
+    -- Combine's Donor slot, beside the target item: dragging an inventory
+    -- item onto it drives exactly the same selection the list drives.
+    -- Hidden for every other option.
+    local donorSlot = HotbarSlotPrefab.Create(UI, "DonorSlot", bg)
+    donorSlot:SetUpdateDelay(-1)
+    donorSlot:SetUsable(false)
+    donorSlot:SetCanDrop(true)
+    donorSlot:SetValidObjectTypes({Item = true})
+    donorSlot.SlotElement:SetPositionRelativeToParent("Top", 70, 75)
+    donorSlot.Events.ObjectDraggedIn:Subscribe(function(ev)
+        UI._OnDonorDropped(ev)
+    end)
+    -- Hint while empty; the prefab's own hover shows the item tooltip (and
+    -- hides on mouse-out) once filled.
+    donorSlot.SlotElement.Events.MouseOver:Subscribe(function(_)
+        if donorSlot:IsEmpty() then
+            Tooltip.ShowSimpleTooltip({
+                Label = QuickForge.TranslatedStrings.DropSlot_Hint:GetString(),
+                TooltipStyle = "Simple",
+                MouseStickMode = "None",
+                UseDelay = true,
+            })
+        end
+    end)
+    UI.DonorSlot = donorSlot
 
     local desc = TextPrefab.Create(UI, "Description", bg, "", "Center", UI.DESC_SIZE)
     desc:SetPositionRelativeToParent("Top", 0, 155)
@@ -124,12 +152,24 @@ end
 
 ---Sizes the panel for the option at hand and re-anchors the bottom-row
 ---elements (bottom-relative positions are computed at call time, not live).
----@param hasPicker boolean
-function UI._Layout(hasPicker)
-    local size = hasPicker and UI.PANEL_SIZE_PICKER or UI.PANEL_SIZE
+---The Donor picker shifts the target item aside to make room for the Donor
+---slot next to it.
+---@param pickerKind QuickForge.PickerKind?
+function UI._Layout(pickerKind)
+    local size = pickerKind ~= nil and UI.PANEL_SIZE_PICKER or UI.PANEL_SIZE
     UI.Panel.Background:SetBackground("FormattedTooltip", size:unpack())
     UI:SetPanelSize(size)
-    UI.PickerList:SetVisible(hasPicker)
+    UI.PickerList:SetVisible(pickerKind ~= nil)
+
+    local hasDonorSlot = pickerKind == "donor"
+    UI.DonorSlot.SlotElement:SetVisible(hasDonorSlot)
+    if hasDonorSlot then
+        UI.ItemSlot.SlotElement:SetPositionRelativeToParent("Top", -40, 75)
+        UI.DonorSlot.SlotElement:SetPositionRelativeToParent("Top", 40, 75)
+    else
+        UI.ItemSlot.SlotElement:SetPositionRelativeToParent("Top", 0, 75)
+    end
+
     UI.CostText:SetPositionRelativeToParent("Bottom", 0, -105)
     UI.FundsText:SetPositionRelativeToParent("Bottom", 0, -75)
     UI.ButtonList:SetPositionRelativeToParent("Bottom", 0, -30)
@@ -285,7 +325,76 @@ function UI._SelectRow(key)
     for rowKey in pairs(UI._RowElements) do
         UI._RefreshRowElement(rowKey)
     end
+    if current.PickerKind == "donor" then
+        -- List and slot never disagree about the current Donor.
+        UI._SyncDonorSlot()
+    end
     UI._RefreshCostAndConfirm()
+end
+
+---Makes the Donor slot show the current selection (or nothing).
+function UI._SyncDonorSlot()
+    local current = UI._Current
+    local row = current and current.Rows
+        and Core.FindPickerRow(current.Rows, current.SelectedKey) or nil
+    local donorItem = row and Item.Get(row.ItemNetID) or nil
+    if donorItem then
+        UI.DonorSlot:SetItem(donorItem)
+    else
+        UI.DonorSlot:Clear()
+    end
+end
+
+---Handles a drop on the Donor slot. The prefab has already placed the
+---dropped item visually; a drop outside the server-computed valid-Donor
+---set is refused with its reason and the slot reverts (never-silent).
+---@param ev GenericUI_Prefab_HotbarSlot_Event_ObjectDraggedIn
+function UI._OnDonorDropped(ev)
+    local current = UI._Current
+    local droppedItem = ev.Object and ev.Object.ItemHandle and Item.Get(ev.Object.ItemHandle) or nil
+    if not current or current.PickerKind ~= "donor" or not droppedItem then
+        UI._SyncDonorSlot()
+        return
+    end
+
+    for _, row in ipairs(current.Rows or {}) do
+        if row.ItemNetID == droppedItem.NetID then
+            UI._SelectRow(row.Key)
+            return
+        end
+    end
+
+    UI._SyncDonorSlot()
+    UI._ShowDonorRefusal(droppedItem)
+end
+
+---Names the reason a dropped item cannot be the Donor: EE2's own message
+---for candidates its checks refused, QuickForge's for equipped items and
+---for anything outside the scanned set.
+---@param droppedItem EclItem
+function UI._ShowDonorRefusal(droppedItem)
+    local current = UI._Current
+    local reason = current and current.InvalidDonors
+        and current.InvalidDonors[tostring(droppedItem.NetID)] or nil
+
+    local body
+    if reason == "QuickForge_Equipped" then
+        body = QuickForge.TranslatedStrings.Error_DonorEquipped:GetString()
+    elseif reason then
+        body = Text.GetTranslatedString("AMER_UI_Greatforge_Combine_" .. reason,
+            QuickForge.TranslatedStrings.Error_DonorInvalid:GetString())
+    else
+        body = QuickForge.TranslatedStrings.Error_DonorInvalid:GetString()
+    end
+
+    MessageBox.Open({
+        ID = DONOR_REFUSED_MSGBOX_ID,
+        Header = GetOptionLabel("Combine"),
+        Message = body,
+        Buttons = {
+            {ID = MSGBOX_BUTTON_DISMISS, Text = Text.CommonStrings.Close:GetString()},
+        },
+    })
 end
 
 ---Updates the cost line and the Confirm gate from the current selection.
@@ -334,6 +443,7 @@ function UI.Open(item, preview)
         Option = preview.Option,
         PickerKind = pickerKind,
         Rows = pickerKind ~= nil and (preview.Rows or {}) or nil,
+        InvalidDonors = preview.InvalidDonors,
         FlatCost = preview.Cost,
         Funds = preview.Funds,
         MatType = preview.MatType,
@@ -345,9 +455,12 @@ function UI.Open(item, preview)
     UI.DescriptionText:SetText(Text.GetTranslatedString("AMER_UI_Greatforge_Desc_" .. preview.Option, ""))
     UI.FundsText:SetText(QuickForge.TranslatedStrings.ForgeWindow_CurrentFunds:GetString():format(preview.Funds))
 
-    UI._Layout(pickerKind ~= nil)
+    UI._Layout(pickerKind)
     if UI._Current.Rows then
         UI._BuildPickerRows(UI._Current.Rows, pickerKind)
+    end
+    if pickerKind == "donor" then
+        UI._SyncDonorSlot()
     end
     UI._RefreshCostAndConfirm()
 

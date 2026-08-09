@@ -417,19 +417,24 @@ end
 ---Builds the Combine donor rows: every item across the whole party's
 ---inventories (equipped items excluded) that passes EE2's donor checks.
 ---An empty result is a legitimate state — the window shows it explicitly.
+---Also reports the refused candidates with their reasons (the suffixes of
+---EE2's own message TSKs, or "QuickForge_Equipped"), keyed by NetID string,
+---so a refused drop on the Donor slot can name its reason.
 ---@param char EsvCharacter
 ---@param item EsvItem
 ---@param specs QuickForge.ItemSpecs
----@return QuickForge.PickerRow[], table<string, {Guid: string, Deltamod: string}>
+---@return QuickForge.PickerRow[], table<string, {Guid: string, Deltamod: string}>, table<string, string>
 function QuickForge._BuildDonorRows(char, item, specs)
     local context = QuickForge._GetCombineContext(specs)
 
-    local rows, raws = {}, {}
+    local rows, raws, invalid = {}, {}, {}
     local candidates = Item.GetItemsInPartyInventory(char, function(candidate)
         return candidate.Stats ~= nil and Item.IsEquipment(candidate)
     end, true)
     for _, candidate in ipairs(candidates) do
-        if Osi.IsEquipped(candidate.MyGuid) ~= true then
+        if Osi.IsEquipped(candidate.MyGuid) == true then
+            invalid[tostring(candidate.NetID)] = "QuickForge_Equipped"
+        else
             local verdict, donorPrefix, donorDeltamod =
                 QuickForge._EvaluateDonorCandidate(item, specs, context, candidate)
             if verdict.valid then
@@ -440,10 +445,12 @@ function QuickForge._BuildDonorRows(char, item, specs)
                     Eligible = true,
                 })
                 raws[candidate.MyGuid] = {Guid = candidate.MyGuid, Deltamod = donorDeltamod}
+            else
+                invalid[tostring(candidate.NetID)] = verdict.reason
             end
         end
     end
-    return rows, raws
+    return rows, raws, invalid
 end
 
 ---Reserves an invisible helper container to stand in for the forge's craft
@@ -647,20 +654,21 @@ function QuickForge._BuildPreview(char, item, option, specs)
     local cost = QuickForge._GenerateCost(option, specs)
     if not cost then return "error" end
 
-    local rows = nil
+    local rows, invalidDonors = nil, nil
     if picker == "property_keep" then
         rows = QuickForge._BuildKeepRows()
         if not rows then return "error" end
     elseif picker == "donor" then
         -- A donorless party is a legitimate preview: the window opens with
         -- an explicit empty state, not a refusal dialog.
-        rows = QuickForge._BuildDonorRows(char, item, specs)
+        rows, _, invalidDonors = QuickForge._BuildDonorRows(char, item, specs)
     end
     return "ok", {
         MatType = cost.MatType,
         Cost = cost.Amount,
         Funds = QuickForge._GetFunds(char, cost),
         Rows = rows,
+        InvalidDonors = invalidDonors,
     }
 end
 

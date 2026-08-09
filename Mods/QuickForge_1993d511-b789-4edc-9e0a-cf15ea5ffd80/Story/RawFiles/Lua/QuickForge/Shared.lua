@@ -139,6 +139,21 @@ local QuickForge = {
             Text = "No item in the party can be combined into this one.",
             ContextDescription = "Forge Window empty state for a donorless Combine picker",
         },
+        DropSlot_Hint = {
+            Handle = "h5e02c8b1gf6d4g49a7gb305g6a1db2c94e78",
+            Text = "Drag an item here to consume it, or pick one from the list.",
+            ContextDescription = "Tooltip on the Combine window's empty Donor slot",
+        },
+        Error_DonorEquipped = {
+            Handle = "h83f61a05g2c47g4d92g8be0gf5709d3c1a26",
+            Text = "Equipped items cannot be consumed. Unequip it first.",
+            ContextDescription = "Refusal reason when an equipped item is dropped on the Donor slot",
+        },
+        Error_DonorInvalid = {
+            Handle = "h0b94d7e6g815cg4f3ag97d2g4ce8a1f06b53",
+            Text = "This item cannot serve as a donor.",
+            ContextDescription = "Generic refusal reason for a Donor-slot drop the server did not list",
+        },
     },
 }
 Epip.RegisterFeature("QuickForge", "QuickForge", QuickForge)
@@ -178,6 +193,7 @@ QuickForge.Core = Ext.Require(MOD_PREFIX, "QuickForge/Core.lua")
 ---@field Cost integer? EE2-computed flat cost (absent for per-row-priced pickers).
 ---@field Funds integer? The player's matching funds (present when Outcome == "ok").
 ---@field Rows QuickForge.PickerRow[]? Picker rows (present for picker options).
+---@field InvalidDonors table<string, string>? Refused Combine candidates: NetID string -> reason (EE2 message TSK suffix, or "QuickForge_Equipped").
 
 ---Client request to commit a previewed Direct Operation.
 ---@class QuickForge.NetMsgs.Commit : NetLib_Message_Character, NetLib_Message_Item
