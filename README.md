@@ -1,5 +1,7 @@
 # QuickForge
 
+## Preview
+
 <img width="536" height="420" alt="image" src="https://github.com/user-attachments/assets/25239975-8606-44ae-b020-ec8e94b5f600" />
 
 <img width="407" height="420" alt="image" src="https://github.com/user-attachments/assets/975ed535-bc53-41c2-b0d9-cf4294c735f8" />
@@ -8,11 +10,9 @@
 
 <img width="599" height="727" alt="image" src="https://github.com/user-attachments/assets/56c9259a-0012-4c2c-a08e-36276ec5f34c" />
 
+## What it does
 
-
-Use the Greatforge straight from your inventory — no more trips to the
-console. For Divinity: Original Sin 2 (Definitive Edition) with Epic
-Encounters 2 and Epip Encounters.
+Use the Greatforge straight from your inventory.
 
 Right-click any piece of equipment and you'll find a new **Greatforge**
 submenu with every option available for that item. Clicking any option opens a confirmation window 
